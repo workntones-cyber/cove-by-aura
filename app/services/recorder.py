@@ -126,6 +126,84 @@ def _sd_callback(indata, frames, time, status):
             _frame_count  = 0
 
 
+
+# ── BlackHole ループバック録音スレッド（Mac） ─────
+def _blackhole_record_thread():
+    """
+    Mac用：BlackHoleデバイスをsounddeviceで直接録音。
+    BlackHoleがインストールされている必要がある。
+    """
+    global _frames, _chunk_index, _frame_count, _recording
+
+    try:
+        import sounddevice as sd
+
+        # BlackHoleデバイスを検索
+        devices     = sd.query_devices()
+        blackhole_id = None
+        for i, dev in enumerate(devices):
+            if "blackhole" in dev["name"].lower() and dev["max_input_channels"] > 0:
+                blackhole_id = i
+                break
+
+        if blackhole_id is None:
+            print("[recorder] BlackHoleデバイスが見つかりません。マイクにフォールバックします。")
+            blackhole_id = None  # デフォルトデバイスを使用
+
+        print(f"[recorder] BlackHoleデバイスID: {blackhole_id} ({devices[blackhole_id]['name'] if blackhole_id is not None else 'デフォルト'})")
+
+        chunk     = 1024
+        src_rate  = int(sd.query_devices(blackhole_id)["default_samplerate"]) if blackhole_id is not None else SAMPLE_RATE
+        src_ch    = min(int(sd.query_devices(blackhole_id)["max_input_channels"]), 2) if blackhole_id is not None else CHANNELS
+
+        def _bh_callback(indata, frames, time, status):
+            global _frames, _chunk_index, _frame_count
+            if status:
+                print(f"[recorder] BlackHole status: {status}")
+            data = indata.copy()
+
+            # ステレオ→モノラル
+            if data.ndim > 1 and data.shape[1] > 1:
+                data = data.mean(axis=1)
+            else:
+                data = data.flatten()
+
+            # サンプルレート変換
+            if src_rate != SAMPLE_RATE:
+                ratio      = SAMPLE_RATE / src_rate
+                new_length = int(len(data) * ratio)
+                indices    = np.linspace(0, len(data) - 1, new_length)
+                data       = np.interp(indices, np.arange(len(data)), data)
+
+            data_int16 = (np.clip(data, -1.0, 1.0) * 32767).astype(np.int16)
+
+            with _lock:
+                _frames.append(data_int16)
+                _frame_count += len(data_int16)
+                if _frame_count >= CHUNK_FRAMES:
+                    _flush_chunk(list(_frames), _session_id, _chunk_index)
+                    _chunk_index += 1
+                    _frames       = []
+                    _frame_count  = 0
+
+        with sd.InputStream(
+            device=blackhole_id,
+            samplerate=src_rate,
+            channels=src_ch,
+            dtype="float32",
+            blocksize=chunk,
+            callback=_bh_callback,
+        ):
+            while _recording:
+                import time as _time
+                _time.sleep(0.1)
+
+        print("[recorder] BlackHole録音停止")
+
+    except Exception as e:
+        print(f"[recorder] BlackHoleエラー: {e}")
+        _recording = False
+
 # ── pyaudiowpatch ループバック録音スレッド（システム音声） ──
 def _soundcard_record_thread():
     """
@@ -237,10 +315,17 @@ def start() -> dict:
         source       = _get_recording_source()
 
         if source == "system":
-            # WASAPIループバック（システム音声）
-            _record_thread = threading.Thread(target=_soundcard_record_thread, daemon=True)
-            _record_thread.start()
-            print(f"[recorder] システム音声録音開始 (pyaudiowpatch WASAPI): {_session_id}")
+            import platform
+            if platform.system() == "Windows":
+                # Windows: pyaudiowpatch WASAPIループバック
+                _record_thread = threading.Thread(target=_soundcard_record_thread, daemon=True)
+                _record_thread.start()
+                print(f"[recorder] システム音声録音開始 (pyaudiowpatch WASAPI): {_session_id}")
+            else:
+                # Mac: BlackHole経由でsounddeviceで録音
+                _record_thread = threading.Thread(target=_blackhole_record_thread, daemon=True)
+                _record_thread.start()
+                print(f"[recorder] システム音声録音開始 (BlackHole): {_session_id}")
         else:
             # sounddevice（マイク入力）
             import sounddevice as sd
