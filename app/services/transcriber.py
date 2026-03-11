@@ -93,8 +93,37 @@ def _transcribe_groq(wav_filename: str, env: dict) -> dict:
         return {"status": "error", "message": f"Groq APIエラー: {str(e)}"}
 
 
-# ── Whisper 文字起こし（リトライ付き） ────────────
+# ── Whisper 文字起こし（チャンク対応・リトライ付き） ──
 def _call_whisper(client: Groq, wav_path: Path) -> str:
+    """
+    WAVファイルを25MB以下のチャンクに分割してWhisperに送信し、
+    結果を結合して返す。
+    """
+    MAX_BYTES = 24 * 1024 * 1024  # 25MB制限に対して余裕を持って24MBに設定
+
+    file_size = wav_path.stat().st_size
+    print(f"[transcriber] ファイルサイズ: {file_size / 1024 / 1024:.1f}MB")
+
+    if file_size <= MAX_BYTES:
+        # 25MB以下はそのまま送信
+        return _send_to_whisper(client, wav_path)
+
+    # 25MB超の場合は時間ベースで分割して送信
+    print(f"[transcriber] ファイルが大きいため分割して送信します")
+    chunks     = _split_wav(wav_path, MAX_BYTES)
+    transcripts = []
+
+    for i, chunk_path in enumerate(chunks):
+        print(f"[transcriber] チャンク {i+1}/{len(chunks)} を送信中...")
+        text = _send_to_whisper(client, chunk_path)
+        transcripts.append(text)
+        chunk_path.unlink()  # 一時チャンクを削除
+
+    return " ".join(transcripts)
+
+
+def _send_to_whisper(client: Groq, wav_path: Path) -> str:
+    """単一ファイルをWhisperに送信する（リトライ付き）"""
     for attempt in range(1, RETRY_COUNT + 1):
         try:
             with open(wav_path, "rb") as f:
@@ -112,6 +141,41 @@ def _call_whisper(client: Groq, wav_path: Path) -> str:
                 time.sleep(RETRY_WAIT)
             else:
                 raise
+
+
+def _split_wav(wav_path: Path, max_bytes: int) -> list[Path]:
+    """WAVファイルをmax_bytes以下のチャンクに分割して一時ファイルとして保存する"""
+    import wave as wave_module
+    import math
+
+    with wave_module.open(str(wav_path), "rb") as wf:
+        n_channels  = wf.getnchannels()
+        sampwidth   = wf.getsampwidth()
+        framerate   = wf.getframerate()
+        n_frames    = wf.getnframes()
+        raw         = wf.readframes(n_frames)
+
+    bytes_per_frame  = n_channels * sampwidth
+    frames_per_chunk = max_bytes // bytes_per_frame
+    total_chunks     = math.ceil(n_frames / frames_per_chunk)
+    chunk_paths      = []
+
+    for i in range(total_chunks):
+        start      = i * frames_per_chunk * bytes_per_frame
+        end        = min(start + frames_per_chunk * bytes_per_frame, len(raw))
+        chunk_raw  = raw[start:end]
+        chunk_path = wav_path.parent / f"{wav_path.stem}_tmp{i}.wav"
+
+        with wave_module.open(str(chunk_path), "wb") as wf:
+            wf.setnchannels(n_channels)
+            wf.setsampwidth(sampwidth)
+            wf.setframerate(framerate)
+            wf.writeframes(chunk_raw)
+
+        chunk_paths.append(chunk_path)
+        print(f"[transcriber] 分割チャンク作成: {chunk_path.name} ({len(chunk_raw)/1024/1024:.1f}MB)")
+
+    return chunk_paths
 
 
 # ── LLaMA 要約（リトライ付き） ────────────────────
