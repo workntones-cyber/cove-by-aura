@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AURA</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #080810;
+      --surface: rgba(255,255,255,0.04);
+      --border: rgba(255,255,255,0.08);
+      --accent: #E85D4A;
+      --accent2: #7C6AF7;
+      --text: #E8E6F0;
+      --muted: #6B7280;
+      --success: #10B981;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Noto Sans JP', sans-serif;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background:
+        radial-gradient(ellipse 60% 50% at 20% 0%, rgba(232,93,74,0.08) 0%, transparent 60%),
+        radial-gradient(ellipse 50% 40% at 80% 100%, rgba(124,106,247,0.08) 0%, transparent 60%);
+      pointer-events: none; z-index: 0;
+    }
+
+    nav {
+      position: sticky; top: 0; z-index: 100;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 32px;
+      background: rgba(8,8,16,0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav-logo {
+      font-family: 'DM Serif Display', serif;
+      font-size: 22px; letter-spacing: 2px;
+      background: linear-gradient(135deg, #E85D4A, #7C6AF7);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .nav-links { display: flex; gap: 4px; }
+
+    .nav-link {
+      padding: 8px 20px; border-radius: 99px;
+      font-size: 13px; font-weight: 500;
+      text-decoration: none; color: var(--muted);
+      transition: all 0.2s;
+    }
+
+    .nav-link:hover { color: var(--text); background: var(--surface); }
+
+    .nav-link.active {
+      color: var(--text); background: var(--surface);
+      border: 1px solid var(--border);
+    }
+
+    main {
+      position: relative; z-index: 1;
+      max-width: 760px; margin: 0 auto;
+      padding: 48px 24px 80px;
+    }
+
+    .meta-section {
+      margin-bottom: 36px; background: var(--surface);
+      border: 1px solid var(--border); border-radius: 20px; padding: 24px;
+    }
+
+    .meta-section label {
+      display: block; font-size: 11px; font-weight: 700; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 1.2px; margin-bottom: 8px;
+    }
+
+    .meta-input {
+      width: 100%; background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border); border-radius: 12px;
+      padding: 12px 16px; color: var(--text);
+      font-family: 'Noto Sans JP', sans-serif; font-size: 14px;
+      transition: border-color 0.2s; resize: none;
+    }
+
+    .meta-input:focus { outline: none; border-color: var(--accent2); }
+    .meta-input::placeholder { color: #374151; }
+    .meta-divider { height: 1px; background: var(--border); margin: 16px 0; }
+
+    .record-section {
+      display: flex; flex-direction: column; align-items: center;
+      margin-bottom: 40px;
+    }
+
+    .visualizer {
+      width: 100%; height: 64px;
+      display: flex; align-items: center; justify-content: center;
+      gap: 3px; margin-bottom: 32px;
+    }
+
+    .visualizer-bar {
+      width: 3px; border-radius: 99px;
+      background: var(--accent); height: 4px;
+    }
+
+    .recording .visualizer-bar { animation: wave 0.8s ease-in-out infinite; }
+
+    @keyframes wave {
+      0%, 100% { height: 4px; opacity: 0.3; }
+      50% { height: 40px; opacity: 1; }
+    }
+
+    .visualizer-bar:nth-child(2n) { animation-delay: 0.1s; }
+    .visualizer-bar:nth-child(3n) { animation-delay: 0.2s; }
+    .visualizer-bar:nth-child(4n) { animation-delay: 0.3s; }
+    .visualizer-bar:nth-child(5n) { animation-delay: 0.15s; }
+
+    .record-btn {
+      width: 96px; height: 96px; border-radius: 50%;
+      border: none; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 32px;
+      background: linear-gradient(135deg, #E85D4A, #C0392B);
+      transition: all 0.3s;
+    }
+
+    .record-btn:hover { transform: scale(1.05); }
+
+    .record-btn.recording {
+      background: linear-gradient(135deg, #374151, #1F2937);
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(232,93,74,0.4); }
+      50% { box-shadow: 0 0 0 20px rgba(232,93,74,0); }
+    }
+
+    .record-label { margin-top: 16px; font-size: 13px; color: var(--muted); }
+
+    .record-timer {
+      margin-top: 8px; font-size: 28px; font-weight: 700;
+      font-variant-numeric: tabular-nums; color: var(--accent); display: none;
+    }
+
+    .record-timer.visible { display: block; }
+
+    .process-section { margin-bottom: 32px; display: none; }
+    .process-section.visible { display: block; }
+
+    .process-step {
+      display: flex; align-items: center; gap: 14px;
+      padding: 14px 18px; border-radius: 14px;
+      background: var(--surface); border: 1px solid var(--border);
+      margin-bottom: 8px; font-size: 13px;
+    }
+
+    .process-step .step-icon {
+      width: 28px; height: 28px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; flex-shrink: 0;
+      background: rgba(255,255,255,0.06); color: var(--muted);
+    }
+
+    .process-step.done .step-icon { background: rgba(16,185,129,0.2); color: var(--success); }
+
+    .process-step.active .step-icon {
+      background: rgba(124,106,247,0.2); color: var(--accent2);
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+    .result-section { margin-bottom: 40px; display: none; }
+    .result-section.visible { display: block; }
+
+    .result-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 20px; overflow: hidden; margin-bottom: 12px;
+    }
+
+    .result-card-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 20px; border-bottom: 1px solid var(--border);
+    }
+
+    .result-card-title {
+      font-size: 12px; font-weight: 700; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 1px;
+    }
+
+    .result-card-body {
+      padding: 16px 20px; font-size: 14px; line-height: 1.8;
+      color: #C9C5D8; white-space: pre-wrap;
+    }
+
+    .export-btn {
+      padding: 6px 14px; border-radius: 99px;
+      background: rgba(255,255,255,0.06); border: 1px solid var(--border);
+      color: var(--muted); font-size: 11px; cursor: pointer; transition: all 0.2s;
+    }
+
+    .export-btn:hover { color: var(--text); background: rgba(255,255,255,0.1); }
+
+    /* ── 過去データ ── */
+    .history-section { margin-top: 48px; }
+
+    .section-title {
+      font-size: 11px; font-weight: 700; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 16px;
+    }
+
+    .history-item {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; margin-bottom: 8px; overflow: hidden;
+      transition: border-color 0.2s;
+    }
+
+    .history-item:hover { border-color: rgba(255,255,255,0.15); }
+
+    .history-header {
+      display: flex; align-items: center; gap: 14px;
+      padding: 16px 20px; cursor: pointer;
+    }
+
+    .history-icon {
+      width: 36px; height: 36px; border-radius: 10px;
+      background: rgba(124,106,247,0.15);
+      border: 1px solid rgba(124,106,247,0.3);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px; flex-shrink: 0;
+    }
+
+    .history-meta { flex: 1; min-width: 0; }
+
+    .history-title {
+      font-size: 14px; font-weight: 700;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+
+    .history-date { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+    .history-chevron { font-size: 16px; color: var(--muted); transition: transform 0.3s; }
+    .history-item.open .history-chevron { transform: rotate(180deg); }
+
+    .history-body { display: none; padding: 0 20px 20px; }
+    .history-item.open .history-body { display: block; }
+    .history-divider { height: 1px; background: var(--border); margin-bottom: 16px; }
+
+    .history-edit-row { display: flex; gap: 8px; margin-bottom: 10px; }
+
+    .history-edit-input {
+      flex: 1; background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border); border-radius: 10px;
+      padding: 9px 14px; color: var(--text);
+      font-family: 'Noto Sans JP', sans-serif; font-size: 13px;
+    }
+
+    .history-edit-input:focus { outline: none; border-color: var(--accent2); }
+
+    /* ── オーディオプレイヤー ── */
+    .audio-player {
+      background: rgba(0,0,0,0.25); border: 1px solid var(--border);
+      border-radius: 14px; padding: 16px 18px; margin-bottom: 14px;
+    }
+
+    .player-top { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+
+    .play-btn {
+      width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0;
+      background: var(--accent); border: none; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; transition: all 0.2s;
+    }
+
+    .play-btn:hover { transform: scale(1.08); opacity: 0.9; }
+
+    .player-right { flex: 1; }
+
+    .player-times {
+      display: flex; justify-content: space-between;
+      font-size: 11px; color: var(--muted);
+      font-variant-numeric: tabular-nums; margin-bottom: 6px;
+    }
+
+    .seek-bar {
+      width: 100%; height: 5px; background: rgba(255,255,255,0.1);
+      border-radius: 99px; cursor: pointer; position: relative;
+    }
+
+    .seek-progress {
+      height: 100%; border-radius: 99px;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      pointer-events: none;
+    }
+
+    .seek-thumb {
+      width: 13px; height: 13px; border-radius: 50%;
+      background: #fff; position: absolute;
+      top: 50%; transform: translate(-50%, -50%);
+      pointer-events: none;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+    }
+
+    .player-bottom { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
+    .speed-label { font-size: 11px; color: var(--muted); margin-right: 2px; }
+
+    .speed-btn {
+      padding: 3px 10px; border-radius: 99px;
+      background: rgba(255,255,255,0.06); border: 1px solid var(--border);
+      color: var(--muted); font-size: 11px; font-weight: 600;
+      cursor: pointer; transition: all 0.2s;
+    }
+
+    .speed-btn.active {
+      background: rgba(124,106,247,0.2);
+      border-color: rgba(124,106,247,0.4); color: #A89CF7;
+    }
+
+    .speed-btn:hover { color: var(--text); }
+
+    /* ── コンテンツタブ ── */
+    .content-tabs { display: flex; gap: 4px; margin-bottom: 10px; }
+
+    .content-tab {
+      padding: 6px 14px; border-radius: 99px;
+      font-size: 12px; font-weight: 600; cursor: pointer;
+      background: var(--surface); border: 1px solid var(--border);
+      color: var(--muted); transition: all 0.2s;
+    }
+
+    .content-tab.active {
+      background: rgba(124,106,247,0.2);
+      border-color: rgba(124,106,247,0.4); color: #A89CF7;
+    }
+
+    .content-panel { display: none; }
+    .content-panel.active { display: block; }
+
+    .history-content {
+      font-size: 13px; line-height: 1.8; color: #9CA3AF;
+      background: rgba(0,0,0,0.2); border-radius: 10px;
+      padding: 12px 14px; margin-bottom: 12px;
+      white-space: pre-wrap; max-height: 200px; overflow-y: auto;
+    }
+
+    .history-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+    .btn {
+      padding: 8px 18px; border-radius: 10px;
+      font-size: 12px; font-weight: 600; cursor: pointer;
+      transition: all 0.2s; border: none;
+    }
+
+    .btn-save {
+      background: rgba(124,106,247,0.2);
+      border: 1px solid rgba(124,106,247,0.4); color: #A89CF7;
+    }
+
+    .btn-save:hover { background: rgba(124,106,247,0.35); }
+
+    .btn-delete {
+      background: rgba(232,93,74,0.15);
+      border: 1px solid rgba(232,93,74,0.3); color: #F87171;
+    }
+
+    .btn-delete:hover { background: rgba(232,93,74,0.3); }
+
+    .empty-state { text-align: center; padding: 40px; color: var(--muted); font-size: 13px; }
+
+    .toast {
+      position: fixed; bottom: 32px; left: 50%;
+      transform: translateX(-50%) translateY(100px);
+      background: #1F2937; border: 1px solid var(--border);
+      border-radius: 12px; padding: 12px 24px;
+      font-size: 13px; color: var(--text);
+      transition: transform 0.3s ease; z-index: 999;
+    }
+
+    .toast.show { transform: translateX(-50%) translateY(0); }
+  </style>
+</head>
+<body>
+
+<nav>
+  <span class="nav-logo">AURA</span>
+  <div class="nav-links">
+    <a href="/" class="nav-link {% if active_page == 'index' %}active{% endif %}">🎙️ 録音</a>
+    <a href="/settings" class="nav-link {% if active_page == 'settings' %}active{% endif %}">⚙️ 設定</a>
+  </div>
+</nav>
+
+<main>
+
+  <div class="meta-section">
+    <label>タイトル</label>
+    <input id="titleInput" class="meta-input" type="text" placeholder="例：週次定例会議" maxlength="100" />
+    <div class="meta-divider"></div>
+    <label>概要メモ</label>
+    <textarea id="memoInput" class="meta-input" rows="2" placeholder="例：Q1の売上について議論"></textarea>
+  </div>
+
+  <div class="record-section">
+    <div class="visualizer" id="visualizer"></div>
+    <button class="record-btn" id="recordBtn" onclick="toggleRecording()">🎙️</button>
+    <div class="record-label" id="recordLabel">タップして録音開始</div>
+    <div class="record-timer" id="recordTimer">00:00</div>
+  </div>
+
+  <div class="process-section" id="processSection">
+    <div class="process-step" id="step1">
+      <div class="step-icon">①</div><span>文字起こし中...</span>
+    </div>
+    <div class="process-step" id="step2">
+      <div class="step-icon">②</div><span>AI要約中...</span>
+    </div>
+  </div>
+
+  <div class="result-section" id="resultSection">
+    <div class="result-card">
+      <div class="result-card-header">
+        <div class="result-card-title">📝 文字起こし</div>
+        <button class="export-btn" onclick="copyText('transcriptBody')">コピー</button>
+      </div>
+      <div class="result-card-body" id="transcriptBody"></div>
+    </div>
+    <div class="result-card">
+      <div class="result-card-header">
+        <div class="result-card-title">✨ AI要約</div>
+        <button class="export-btn" onclick="exportText()">保存</button>
+      </div>
+      <div class="result-card-body" id="summaryBody"></div>
+    </div>
+  </div>
+
+  <div class="history-section">
+    <div class="section-title">過去の録音</div>
+    <div id="historyList"></div>
+  </div>
+
+</main>
+
+<div class="toast" id="toast"></div>
+<audio id="globalAudio"></audio>
+
+<script>
+  let isRecording = false;
+  let currentRecordId = null;
+  let timerInterval = null;
+  let seconds = 0;
+
+  const audio = document.getElementById('globalAudio');
+  let currentPlayerId = null;
+  const speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+
+  document.addEventListener('DOMContentLoaded', () => {
+    buildVisualizer();
+    loadHistory();
+  });
+
+  function buildVisualizer() {
+    const v = document.getElementById('visualizer');
+    for (let i = 0; i < 40; i++) {
+      const bar = document.createElement('div');
+      bar.className = 'visualizer-bar';
+      v.appendChild(bar);
+    }
+  }
+
+  async function toggleRecording() {
+    if (!isRecording) await startRecording();
+    else await stopRecording();
+  }
+
+  async function startRecording() {
+    const res = await fetch('/api/record/start', { method: 'POST' });
+    const data = await res.json();
+    if (data.status !== 'started') { showToast('❌ ' + (data.message || '録音開始に失敗しました')); return; }
+    isRecording = true; seconds = 0;
+    document.getElementById('recordBtn').classList.add('recording');
+    document.getElementById('recordBtn').textContent = '⏹️';
+    document.getElementById('recordLabel').textContent = '録音中... タップして停止';
+    document.getElementById('recordTimer').classList.add('visible');
+    document.getElementById('visualizer').classList.add('recording');
+    timerInterval = setInterval(() => {
+      seconds++;
+      const m = String(Math.floor(seconds / 60)).padStart(2, '0');
+      const s = String(seconds % 60).padStart(2, '0');
+      document.getElementById('recordTimer').textContent = `${m}:${s}`;
+    }, 1000);
+  }
+
+  async function stopRecording() {
+    clearInterval(timerInterval);
+    isRecording = false;
+    document.getElementById('recordBtn').classList.remove('recording');
+    document.getElementById('recordBtn').textContent = '🎙️';
+    document.getElementById('recordLabel').textContent = 'タップして録音開始';
+    document.getElementById('recordTimer').classList.remove('visible');
+    document.getElementById('visualizer').classList.remove('recording');
+
+    const title = document.getElementById('titleInput').value || '無題';
+    const memo  = document.getElementById('memoInput').value  || '';
+
+    const res = await fetch('/api/record/stop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, memo }),
+    });
+    const data = await res.json();
+    if (data.status !== 'stopped') { showToast('❌ ' + (data.message || '録音停止に失敗しました')); return; }
+
+    currentRecordId = data.record_id;
+    showToast(`✅ 録音完了（${data.duration}秒）`);
+    await runTranscribe(currentRecordId);
+  }
+
+  async function runTranscribe(recordId) {
+    const processSection = document.getElementById('processSection');
+    const step1 = document.getElementById('step1');
+    const step2 = document.getElementById('step2');
+    processSection.classList.add('visible');
+    step1.classList.add('active');
+
+    const res = await fetch('/api/transcribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ record_id: recordId }),
+    });
+    const data = await res.json();
+
+    step1.classList.remove('active'); step1.classList.add('done');
+    step1.querySelector('.step-icon').textContent = '✓';
+    step1.querySelector('span').textContent = '文字起こし完了';
+    step2.classList.add('active');
+    await new Promise(r => setTimeout(r, 500));
+    step2.classList.remove('active'); step2.classList.add('done');
+    step2.querySelector('.step-icon').textContent = '✓';
+    step2.querySelector('span').textContent = 'AI要約完了';
+
+    document.getElementById('transcriptBody').textContent = data.transcript;
+    document.getElementById('summaryBody').textContent    = data.ai_summary;
+    document.getElementById('resultSection').classList.add('visible');
+    document.getElementById('titleInput').value = '';
+    document.getElementById('memoInput').value  = '';
+
+    await loadHistory();
+    showToast('🎉 完了しました！');
+  }
+
+  async function loadHistory() {
+    const res  = await fetch('/api/recordings');
+    const list = await res.json();
+    const container = document.getElementById('historyList');
+
+    if (list.length === 0) {
+      container.innerHTML = '<div class="empty-state">📭 録音データがありません</div>';
+      return;
+    }
+
+    container.innerHTML = list.map(r => `
+      <div class="history-item" id="history-${r.id}">
+        <div class="history-header" onclick="toggleHistory(${r.id})">
+          <div class="history-icon">🎙️</div>
+          <div class="history-meta">
+            <div class="history-title">${escHtml(r.title)}</div>
+            <div class="history-date">${r.created_at}</div>
+          </div>
+          <div class="history-chevron">▾</div>
+        </div>
+
+        <div class="history-body">
+          <div class="history-divider"></div>
+
+          <div class="history-edit-row">
+            <input class="history-edit-input" id="edit-title-${r.id}"
+              type="text" value="${escHtml(r.title)}" placeholder="タイトル" />
+          </div>
+          <div class="history-edit-row">
+            <input class="history-edit-input" id="edit-memo-${r.id}"
+              type="text" value="${escHtml(r.memo)}" placeholder="概要メモ" />
+          </div>
+
+          <!-- フルオーディオプレイヤー -->
+          <div class="audio-player">
+            <div class="player-top">
+              <button class="play-btn" id="play-btn-${r.id}"
+                onclick="togglePlay(${r.id}, '/api/audio/${escHtml(r.wav_file)}')">▶</button>
+              <div class="player-right">
+                <div class="player-times">
+                  <span id="cur-${r.id}">0:00</span>
+                  <span id="dur-${r.id}">--:--</span>
+                </div>
+                <div class="seek-bar" id="seek-${r.id}"
+                  onclick="seekTo(event, ${r.id})"
+                  onmousedown="startDrag(${r.id})"
+                  onmouseup="stopDrag()">
+                  <div class="seek-progress" id="prog-${r.id}" style="width:0%"></div>
+                  <div class="seek-thumb"    id="thumb-${r.id}" style="left:0%"></div>
+                </div>
+              </div>
+            </div>
+            <div class="player-bottom">
+              <span class="speed-label">速度：</span>
+              ${speeds.map(s => `
+                <button class="speed-btn ${s === 1.0 ? 'active' : ''}"
+                  id="speed-${r.id}-${s.toString().replace('.','_')}"
+                  onclick="setSpeed(${r.id}, ${s})">
+                  ${s}x
+                </button>
+              `).join('')}
+            </div>
+          </div>
+
+          <!-- 文字起こし / 要約 タブ -->
+          ${(r.transcript || r.ai_summary) ? `
+            <div class="content-tabs">
+              ${r.transcript ? `<div class="content-tab active" id="tab-tr-${r.id}" onclick="showTab(${r.id},'transcript')">📝 文字起こし</div>` : ''}
+              ${r.ai_summary ? `<div class="content-tab ${!r.transcript?'active':''}" id="tab-su-${r.id}" onclick="showTab(${r.id},'summary')">✨ AI要約</div>` : ''}
+            </div>
+            ${r.transcript ? `
+              <div class="content-panel active" id="panel-transcript-${r.id}">
+                <div class="history-content">${escHtml(r.transcript)}</div>
+              </div>` : ''}
+            ${r.ai_summary ? `
+              <div class="content-panel ${!r.transcript?'active':''}" id="panel-summary-${r.id}">
+                <div class="history-content">${escHtml(r.ai_summary)}</div>
+              </div>` : ''}
+          ` : ''}
+
+          <div class="history-actions">
+            <button class="btn btn-save"   onclick="saveHistory(${r.id})">💾 保存</button>
+            <button class="btn btn-delete" onclick="deleteHistory(${r.id})">🗑️ 削除</button>
+          </div>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  function toggleHistory(id) {
+    document.getElementById(`history-${id}`).classList.toggle('open');
+  }
+
+  function showTab(id, type) {
+    ['transcript','summary'].forEach(t => {
+      const tabId = t === 'transcript' ? `tab-tr-${id}` : `tab-su-${id}`;
+      const tab   = document.getElementById(tabId);
+      const panel = document.getElementById(`panel-${t}-${id}`);
+      if (tab)   tab.classList.toggle('active',   t === type);
+      if (panel) panel.classList.toggle('active', t === type);
+    });
+  }
+
+  // ── プレイヤー制御 ─────────────────────────
+  let isDragging = false;
+  let dragId = null;
+
+  function startDrag(id) { isDragging = true; dragId = id; }
+  function stopDrag()     { isDragging = false; dragId = null; }
+
+  document.addEventListener('mousemove', e => {
+    if (!isDragging || dragId === null) return;
+    seekTo(e, dragId);
+  });
+
+  document.addEventListener('mouseup', stopDrag);
+
+  function togglePlay(id, src) {
+    const btn = document.getElementById(`play-btn-${id}`);
+
+    if (currentPlayerId === id && !audio.paused) {
+      audio.pause(); btn.textContent = '▶'; return;
+    }
+
+    if (currentPlayerId && currentPlayerId !== id) {
+      const prev = document.getElementById(`play-btn-${currentPlayerId}`);
+      if (prev) prev.textContent = '▶';
+      audio.pause();
+    }
+
+    currentPlayerId = id;
+    if (audio.getAttribute('data-src') !== src) {
+      audio.src = src;
+      audio.setAttribute('data-src', src);
+      audio.load();
+    }
+
+    audio.play().catch(() => showToast('❌ 音声ファイルを読み込めませんでした'));
+    btn.textContent = '⏸';
+
+    audio.ontimeupdate     = () => updateUI(id);
+    audio.onloadedmetadata = () => { document.getElementById(`dur-${id}`).textContent = fmtTime(audio.duration); };
+    audio.onended = () => {
+      btn.textContent = '▶';
+      document.getElementById(`prog-${id}`).style.width = '0%';
+      document.getElementById(`thumb-${id}`).style.left = '0%';
+      document.getElementById(`cur-${id}`).textContent  = '0:00';
+    };
+  }
+
+  function updateUI(id) {
+    if (!audio.duration) return;
+    const pct = (audio.currentTime / audio.duration) * 100;
+    document.getElementById(`prog-${id}`).style.width = `${pct}%`;
+    document.getElementById(`thumb-${id}`).style.left = `${pct}%`;
+    document.getElementById(`cur-${id}`).textContent  = fmtTime(audio.currentTime);
+  }
+
+  function seekTo(e, id) {
+    if (currentPlayerId !== id) return;
+    const bar  = document.getElementById(`seek-${id}`);
+    const rect = bar.getBoundingClientRect();
+    const pct  = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    audio.currentTime = pct * audio.duration;
+  }
+
+  function setSpeed(id, speed) {
+    audio.playbackRate = speed;
+    speeds.forEach(s => {
+      const btn = document.getElementById(`speed-${id}-${s.toString().replace('.','_')}`);
+      if (btn) btn.classList.toggle('active', s === speed);
+    });
+  }
+
+  function fmtTime(sec) {
+    if (!sec || isNaN(sec)) return '0:00';
+    return `${Math.floor(sec/60)}:${String(Math.floor(sec%60)).padStart(2,'0')}`;
+  }
+
+  // ── 保存・削除 ────────────────────────────
+  async function saveHistory(id) {
+    const title = document.getElementById(`edit-title-${id}`).value;
+    const memo  = document.getElementById(`edit-memo-${id}`).value;
+    const res   = await fetch(`/api/recordings/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, memo }),
+    });
+    const data = await res.json();
+    if (data.status === 'updated') { showToast('✅ 保存しました'); await loadHistory(); }
+    else { showToast('❌ ' + (data.message || '保存に失敗しました')); }
+  }
+
+  async function deleteHistory(id) {
+    if (!confirm('このデータを削除しますか？')) return;
+    const res  = await fetch(`/api/recordings/${id}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.status === 'deleted') { showToast('🗑️ 削除しました'); await loadHistory(); }
+    else { showToast('❌ ' + (data.message || '削除に失敗しました')); }
+  }
+
+  function copyText(id) {
+    navigator.clipboard.writeText(document.getElementById(id).textContent);
+    showToast('📋 コピーしました');
+  }
+
+  function exportText() {
+    const text = document.getElementById('summaryBody').textContent;
+    const blob = new Blob([text], { type: 'text/plain' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = 'aura_summary.txt'; a.click();
+  }
+
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 3000);
+  }
+
+  function escHtml(str) {
+    if (!str) return '';
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+</script>
+</body>
+</html>

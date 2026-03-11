@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AURA - 設定</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #080810;
+      --surface: rgba(255,255,255,0.04);
+      --border: rgba(255,255,255,0.08);
+      --accent: #E85D4A;
+      --accent2: #7C6AF7;
+      --text: #E8E6F0;
+      --muted: #6B7280;
+      --success: #10B981;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Noto Sans JP', sans-serif;
+      min-height: 100vh;
+    }
+
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background:
+        radial-gradient(ellipse 60% 50% at 80% 0%, rgba(124,106,247,0.08) 0%, transparent 60%),
+        radial-gradient(ellipse 50% 40% at 20% 100%, rgba(232,93,74,0.06) 0%, transparent 60%);
+      pointer-events: none; z-index: 0;
+    }
+
+    nav {
+      position: sticky; top: 0; z-index: 100;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 32px;
+      background: rgba(8,8,16,0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav-logo {
+      font-family: 'DM Serif Display', serif;
+      font-size: 22px; letter-spacing: 2px;
+      background: linear-gradient(135deg, #E85D4A, #7C6AF7);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .nav-links { display: flex; gap: 4px; }
+
+    .nav-link {
+      padding: 8px 20px; border-radius: 99px;
+      font-size: 13px; font-weight: 500;
+      text-decoration: none; color: var(--muted);
+      transition: all 0.2s;
+    }
+
+    .nav-link:hover { color: var(--text); background: var(--surface); }
+
+    .nav-link.active {
+      color: var(--text);
+      background: var(--surface);
+      border: 1px solid var(--border);
+    }
+
+    main {
+      position: relative; z-index: 1;
+      max-width: 640px; margin: 0 auto;
+      padding: 48px 24px 80px;
+    }
+
+    .page-header { margin-bottom: 36px; }
+
+    .page-header h1 {
+      font-size: 24px; font-weight: 800;
+      letter-spacing: -0.5px; margin-bottom: 4px;
+    }
+
+    .page-header p { font-size: 13px; color: var(--muted); }
+
+    /* ── セクション ── */
+    .settings-section { margin-bottom: 28px; }
+
+    .settings-section-title {
+      font-size: 11px; font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase; letter-spacing: 1.5px;
+      margin-bottom: 12px;
+    }
+
+    .settings-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 4px 20px;
+    }
+
+    .settings-row {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 20px; padding: 16px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .settings-row:last-child { border-bottom: none; }
+
+    .settings-row-label { flex: 1; }
+
+    .settings-row-label span {
+      display: block; font-size: 14px; font-weight: 600;
+      margin-bottom: 2px;
+    }
+
+    .settings-row-label small {
+      font-size: 12px; color: var(--muted); line-height: 1.5;
+    }
+
+    /* AIモードカード選択 */
+    .mode-cards {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 10px; padding: 16px 0;
+    }
+
+    .mode-card {
+      border-radius: 14px; padding: 16px;
+      border: 2px solid var(--border);
+      background: rgba(255,255,255,0.02);
+      cursor: pointer; transition: all 0.25s;
+      position: relative;
+    }
+
+    .mode-card:hover { border-color: rgba(255,255,255,0.2); }
+
+    .mode-card.active-personal {
+      border-color: #0EA5E9;
+      background: rgba(14,165,233,0.08);
+    }
+
+    .mode-card.active-business {
+      border-color: var(--success);
+      background: rgba(16,185,129,0.08);
+    }
+
+    .mode-card-check {
+      position: absolute; top: 10px; right: 10px;
+      width: 18px; height: 18px; border-radius: 50%;
+      display: none; align-items: center; justify-content: center;
+      font-size: 10px; font-weight: 700; color: #fff;
+    }
+
+    .mode-card.active-personal .mode-card-check,
+    .mode-card.active-business .mode-card-check {
+      display: flex;
+    }
+
+    .mode-card.active-personal .mode-card-check { background: #0EA5E9; }
+    .mode-card.active-business .mode-card-check { background: var(--success); }
+
+    .mode-card-icon { font-size: 22px; margin-bottom: 8px; }
+
+    .mode-card-name { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
+
+    .mode-card-engine {
+      display: inline-block;
+      font-size: 10px; padding: 2px 8px; border-radius: 99px;
+      font-weight: 700; letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+
+    .mode-card.active-personal .mode-card-engine {
+      background: rgba(14,165,233,0.2); color: #38BDF8;
+    }
+
+    .mode-card.active-business .mode-card-engine {
+      background: rgba(16,185,129,0.2); color: #34D399;
+    }
+
+    .mode-card:not(.active-personal):not(.active-business) .mode-card-engine {
+      background: rgba(255,255,255,0.06); color: var(--muted);
+    }
+
+    .mode-card-desc { font-size: 11px; color: var(--muted); line-height: 1.5; }
+
+    /* ビジネス用注釈 */
+    .business-notice {
+      margin-top: 10px; padding: 12px 16px;
+      border-radius: 12px;
+      background: rgba(245,158,11,0.08);
+      border: 1px solid rgba(245,158,11,0.25);
+      font-size: 12px; color: #FCD34D;
+      line-height: 1.6;
+      display: none;
+    }
+
+    .business-notice.visible { display: block; }
+
+    /* API キー入力 */
+    .api-key-input {
+      width: 100%;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 14px;
+      color: var(--text);
+      font-family: monospace;
+      font-size: 13px;
+      transition: border-color 0.2s;
+    }
+
+    .api-key-input:focus { outline: none; border-color: var(--accent2); }
+    .api-key-input::placeholder { color: #374151; }
+
+    .api-key-row {
+      display: flex; gap: 8px; align-items: center;
+      padding: 16px 0;
+    }
+
+    .api-key-toggle {
+      padding: 8px 14px; border-radius: 8px;
+      background: var(--surface); border: 1px solid var(--border);
+      color: var(--muted); font-size: 12px;
+      cursor: pointer; white-space: nowrap;
+      transition: all 0.2s; flex-shrink: 0;
+    }
+
+    .api-key-toggle:hover { color: var(--text); }
+
+    /* 保存ボタン */
+    .save-btn {
+      width: 100%; padding: 16px;
+      background: linear-gradient(135deg, #6D28D9, #4F46E5);
+      border: none; border-radius: 14px;
+      color: #fff; font-size: 15px; font-weight: 700;
+      cursor: pointer; transition: all 0.3s;
+      letter-spacing: 0.3px;
+    }
+
+    .save-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+
+    .save-btn.saved {
+      background: rgba(16,185,129,0.2);
+      border: 1px solid var(--success);
+      color: var(--success);
+    }
+
+    .toast {
+      position: fixed; bottom: 32px; left: 50%;
+      transform: translateX(-50%) translateY(100px);
+      background: #1F2937; border: 1px solid var(--border);
+      border-radius: 12px; padding: 12px 24px;
+      font-size: 13px; color: var(--text);
+      transition: transform 0.3s ease; z-index: 999;
+    }
+
+    .toast.show { transform: translateX(-50%) translateY(0); }
+  </style>
+</head>
+<body>
+
+<nav>
+  <span class="nav-logo">AURA</span>
+  <div class="nav-links">
+    <a href="/" class="nav-link {% if active_page == 'index' %}active{% endif %}">🎙️ 録音</a>
+    <a href="/settings" class="nav-link {% if active_page == 'settings' %}active{% endif %}">⚙️ 設定</a>
+  </div>
+</nav>
+
+<main>
+  <div class="page-header">
+    <h1>⚙️ 設定</h1>
+    <p>AIモードとAPI接続情報を設定します</p>
+  </div>
+
+  <!-- AIモード設定 -->
+  <div class="settings-section">
+    <div class="settings-section-title">🤖 AIモード</div>
+    <div class="settings-card">
+      <div class="mode-cards">
+        <div class="mode-card" id="card-personal" onclick="selectMode('personal')">
+          <div class="mode-card-check">✓</div>
+          <div class="mode-card-icon">👤</div>
+          <div class="mode-card-name">個人用</div>
+          <div class="mode-card-engine">Gemini API</div>
+          <div class="mode-card-desc">クラウド処理。高速・高精度。個人利用に最適。</div>
+        </div>
+        <div class="mode-card" id="card-business" onclick="selectMode('business')">
+          <div class="mode-card-check">✓</div>
+          <div class="mode-card-icon">🏢</div>
+          <div class="mode-card-name">ビジネス用</div>
+          <div class="mode-card-engine">faster-whisper</div>
+          <div class="mode-card-desc">完全ローカル処理。機密会議・社内情報に最適。</div>
+        </div>
+      </div>
+
+      <!-- ビジネス用注釈 -->
+      <div class="business-notice" id="businessNotice">
+        ⚠️ <strong>faster-whisper の動作要件</strong><br>
+        GPU（VRAM 8GB以上）を推奨します。GPUがない場合もCPUで動作しますが、
+        処理に数分かかる場合があります。初回起動時にモデルファイル（約3GB）を
+        自動ダウンロードします。
+      </div>
+    </div>
+  </div>
+
+  <!-- Gemini API設定 -->
+  <div class="settings-section" id="geminiSection">
+    <div class="settings-section-title">🔑 Gemini API 接続情報</div>
+    <div class="settings-card">
+      <div class="api-key-row">
+        <input
+          class="api-key-input" id="apiKeyInput"
+          type="password" placeholder="AIzaSy..."
+        />
+        <button class="api-key-toggle" onclick="toggleApiKeyVisibility()">表示</button>
+      </div>
+      <p style="font-size:11px;color:var(--muted);padding-bottom:12px;line-height:1.6;">
+        APIキーは <code style="color:#9CA3AF;">.env</code> ファイルに保存されます。
+        GitHubには一切アップロードされません。
+        <a href="https://aistudio.google.com/" target="_blank"
+          style="color:var(--accent2);text-decoration:none;">
+          Google AI Studio で取得 →
+        </a>
+      </p>
+    </div>
+  </div>
+
+  <!-- 保存ボタン -->
+  <button class="save-btn" id="saveBtn" onclick="saveSettings()">設定を保存</button>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  let currentMode = 'personal';
+  let apiKeyVisible = false;
+
+  // ── 初期化 ────────────────────────────────
+  document.addEventListener('DOMContentLoaded', async () => {
+    await loadSettings();
+  });
+
+  async function loadSettings() {
+    try {
+      const res = await fetch('/api/settings');
+      if (!res.ok) return;
+      const data = await res.json();
+      selectMode(data.ai_mode || 'personal', false);
+      if (data.gemini_api_key) {
+        document.getElementById('apiKeyInput').value = data.gemini_api_key;
+      }
+    } catch (e) {
+      // 設定未保存の場合はデフォルト値のまま
+    }
+  }
+
+  // ── モード選択 ────────────────────────────
+  function selectMode(mode, showNotice = true) {
+    currentMode = mode;
+
+    document.getElementById('card-personal').className = 'mode-card';
+    document.getElementById('card-business').className = 'mode-card';
+
+    if (mode === 'personal') {
+      document.getElementById('card-personal').classList.add('active-personal');
+      document.getElementById('businessNotice').classList.remove('visible');
+      document.getElementById('geminiSection').style.display = 'block';
+    } else {
+      document.getElementById('card-business').classList.add('active-business');
+      if (showNotice) {
+        document.getElementById('businessNotice').classList.add('visible');
+      }
+      document.getElementById('geminiSection').style.display = 'none';
+    }
+  }
+
+  // ── APIキー表示切替 ───────────────────────
+  function toggleApiKeyVisibility() {
+    apiKeyVisible = !apiKeyVisible;
+    const input = document.getElementById('apiKeyInput');
+    const btn = document.querySelector('.api-key-toggle');
+    input.type = apiKeyVisible ? 'text' : 'password';
+    btn.textContent = apiKeyVisible ? '隠す' : '表示';
+  }
+
+  // ── 設定保存 ──────────────────────────────
+  async function saveSettings() {
+    const apiKey = document.getElementById('apiKeyInput').value.trim();
+
+    if (currentMode === 'personal' && !apiKey) {
+      showToast('❌ Gemini APIキーを入力してください');
+      return;
+    }
+
+    const res = await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ai_mode: currentMode,
+        gemini_api_key: apiKey,
+      }),
+    });
+
+    const data = await res.json();
+    if (data.status === 'saved') {
+      const btn = document.getElementById('saveBtn');
+      btn.textContent = '✓ 保存しました';
+      btn.classList.add('saved');
+      setTimeout(() => {
+        btn.textContent = '設定を保存';
+        btn.classList.remove('saved');
+      }, 2000);
+      showToast('✅ 設定を保存しました');
+    } else {
+      showToast('❌ 保存に失敗しました');
+    }
+  }
+
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 3000);
+  }
+</script>
+</body>
+</html>
