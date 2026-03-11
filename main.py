@@ -1,4 +1,7 @@
-from flask import Flask, jsonify, render_template, request
+import os
+from pathlib import Path
+
+from flask import Flask, jsonify, render_template, request, send_from_directory
 
 from app.database import (
     create_recording,
@@ -179,19 +182,89 @@ def recordings_delete(record_id: int):
 
 
 # ══════════════════════════════════════════════════
+#  音声ファイル配信 API
+# ══════════════════════════════════════════════════
+
+UPLOADS_DIR = Path(__file__).resolve().parent / "uploads"
+
+@app.route("/api/audio/<filename>")
+def serve_audio(filename):
+    """
+    WAVファイルをブラウザに配信する（過去データの再生用）。
+    ディレクトリトラバーサル対策のため send_from_directory を使用。
+    """
+    return send_from_directory(str(UPLOADS_DIR), filename)
+
+
+# ══════════════════════════════════════════════════
+#  設定 API
+# ══════════════════════════════════════════════════
+
+ENV_PATH = Path(__file__).parent / ".env"
+
+def _read_env() -> dict:
+    """`.env` ファイルを読み込んで辞書で返す"""
+    env = {}
+    if not ENV_PATH.exists():
+        return env
+    for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        env[key.strip()] = val.strip()
+    return env
+
+def _write_env(data: dict) -> None:
+    """辞書の内容を `.env` ファイルに書き込む（既存の値をマージ）"""
+    existing = _read_env()
+    existing.update(data)
+    lines = [f"{k}={v}" for k, v in existing.items()]
+    ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+@app.route("/api/settings", methods=["GET"])
+def settings_get():
+    """
+    現在の設定を返す（APIキーはマスキング）。
+    Response: {"ai_mode": str, "gemini_api_key": str}
+    """
+    env = _read_env()
+    api_key = env.get("GEMINI_API_KEY", "")
+    # 画面表示用に末尾4文字以外をマスク
+    masked = ("*" * (len(api_key) - 4) + api_key[-4:]) if len(api_key) > 4 else api_key
+    return jsonify({
+        "ai_mode": env.get("AI_MODE", "personal"),
+        "gemini_api_key": masked,
+    }), 200
+
+
+@app.route("/api/settings", methods=["POST"])
+def settings_save():
+    """
+    設定を `.env` ファイルに保存する。
+    Request JSON: {"ai_mode": str, "gemini_api_key": str}
+    Response: {"status": "saved"}
+    """
+    data = request.get_json(silent=True) or {}
+    ai_mode    = data.get("ai_mode", "personal")
+    gemini_key = data.get("gemini_api_key", "").strip()
+
+    save_data = {"AI_MODE": ai_mode}
+    # キーが入力されていれば保存（マスク済みの場合は上書きしない）
+    if gemini_key and not gemini_key.startswith("*"):
+        save_data["GEMINI_API_KEY"] = gemini_key
+
+    try:
+        _write_env(save_data)
+        return jsonify({"status": "saved"}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+# ══════════════════════════════════════════════════
 #  起動
 # ══════════════════════════════════════════════════
 
 if __name__ == "__main__":
     app.run(debug=True)
-
-"""
-動作テスト用コマンド
-
-
-uv run python app/main.py
-ブラウザで http://127.0.0.1:5000 を開く
-
-
-
-"""
