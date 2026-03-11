@@ -35,6 +35,9 @@ a = Analysis(
         'sounddevice',
         'numpy',
         'wave',
+        # システム音声録音（Windows WASAPI）
+        'pyaudiowpatch',
+        'pyaudio',
         # Groq
         'groq',
         # DB
