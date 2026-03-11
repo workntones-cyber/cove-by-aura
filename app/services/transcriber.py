@@ -3,22 +3,22 @@ transcriber.py
 文字起こし & AI要約サービス
 
 AIモードに応じて以下を切り替える：
-  - personal  : Gemini API（クラウド）
+  - personal  : Groq API（Whisper文字起こし + LLaMA要約）
   - business  : faster-whisper（完全ローカル）※ Phase 3後半で実装
 """
 
 import time
 from pathlib import Path
 
-from google import genai
-from google.genai import types
+from groq import Groq
 
 # ── 設定 ──────────────────────────────────────────
-UPLOADS_DIR = Path(__file__).resolve().parent.parent.parent / "uploads"
-ENV_PATH    = Path(__file__).resolve().parent.parent.parent / ".env"
-MODEL_NAME  = "gemini-2.0-flash"
-RETRY_COUNT = 3     # リトライ回数
-RETRY_WAIT  = 30    # 429エラー時のリトライ間隔（秒）
+UPLOADS_DIR        = Path(__file__).resolve().parent.parent.parent / "uploads"
+ENV_PATH           = Path(__file__).resolve().parent.parent.parent / ".env"
+WHISPER_MODEL      = "whisper-large-v3-turbo"   # 文字起こし用
+SUMMARY_MODEL      = "llama-3.3-70b-versatile"  # 要約用
+RETRY_COUNT        = 3
+RETRY_WAIT         = 30  # 429エラー時のリトライ間隔（秒）
 
 
 # ── .env 読み込み ─────────────────────────────────
@@ -53,37 +53,16 @@ def transcribe_and_summarize(wav_filename: str) -> dict:
     if ai_mode == "business":
         return _transcribe_faster_whisper(wav_filename)
     else:
-        return _transcribe_gemini(wav_filename, env)
+        return _transcribe_groq(wav_filename, env)
 
 
-# ── Gemini APIリクエスト（リトライ付き） ──────────
-def _call_gemini(client, contents: list) -> str:
-    """
-    429エラー時に RETRY_WAIT 秒待ってリトライする。
-    RETRY_COUNT 回失敗したら例外を raise する。
-    """
-    for attempt in range(1, RETRY_COUNT + 1):
-        try:
-            response = client.models.generate_content(
-                model=MODEL_NAME,
-                contents=contents,
-            )
-            return response.text.strip()
-        except Exception as e:
-            if "429" in str(e) and attempt < RETRY_COUNT:
-                print(f"[transcriber] 429 レート制限 - {RETRY_WAIT}秒後にリトライ ({attempt}/{RETRY_COUNT})")
-                time.sleep(RETRY_WAIT)
-            else:
-                raise
-
-
-# ── Gemini API（個人用） ───────────────────────────
-def _transcribe_gemini(wav_filename: str, env: dict) -> dict:
-    api_key = env.get("GEMINI_API_KEY", "").strip()
+# ── Groq API（個人用） ────────────────────────────
+def _transcribe_groq(wav_filename: str, env: dict) -> dict:
+    api_key = env.get("GROQ_API_KEY", "").strip()
     if not api_key:
         return {
             "status": "error",
-            "message": "Gemini APIキーが設定されていません。設定画面で入力してください。",
+            "message": "Groq APIキーが設定されていません。設定画面で入力してください。",
         }
 
     wav_path = UPLOADS_DIR / wav_filename
@@ -91,33 +70,16 @@ def _transcribe_gemini(wav_filename: str, env: dict) -> dict:
         return {"status": "error", "message": f"音声ファイルが見つかりません: {wav_filename}"}
 
     try:
-        client      = genai.Client(api_key=api_key)
-        audio_bytes = wav_path.read_bytes()
+        client = Groq(api_key=api_key)
 
-        # ── 文字起こし & 要約を1回のAPIコールで取得 ──
-        # APIコールを1回にまとめることでレート制限を回避する
-        prompt = (
-            "以下の音声に対して、2つのタスクを実行してください。\n\n"
-            "【タスク1: 文字起こし】\n"
-            "音声を正確に文字起こしし、話し言葉をそのまま書き起こしてください。句読点を適切に追加してください。\n\n"
-            "【タスク2: 要約】\n"
-            "文字起こし内容の重要なポイントを3〜5つの箇条書きでまとめてください。各ポイントは簡潔に1〜2文で記述してください。\n\n"
-            "以下の形式で出力してください（この形式を厳守してください）：\n"
-            "---TRANSCRIPT---\n"
-            "（文字起こし内容）\n"
-            "---SUMMARY---\n"
-            "（要約内容）"
-        )
-
-        result_text = _call_gemini(client, [
-            prompt,
-            types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav"),
-        ])
-
-        # レスポンスをパース
-        transcript, ai_summary = _parse_response(result_text)
-
+        # ── ① 文字起こし（Whisper） ───────────────
+        print(f"[transcriber] 文字起こし開始: {wav_filename}")
+        transcript = _call_whisper(client, wav_path)
         print(f"[transcriber] 文字起こし完了: {len(transcript)}文字")
+
+        # ── ② 要約（LLaMA） ──────────────────────
+        print(f"[transcriber] 要約開始")
+        ai_summary = _call_llama(client, transcript)
         print(f"[transcriber] 要約完了: {len(ai_summary)}文字")
 
         return {
@@ -127,25 +89,56 @@ def _transcribe_gemini(wav_filename: str, env: dict) -> dict:
         }
 
     except Exception as e:
-        print(f"[transcriber] Gemini エラー: {e}")
-        return {"status": "error", "message": f"Gemini APIエラー: {str(e)}"}
+        print(f"[transcriber] Groq エラー: {e}")
+        return {"status": "error", "message": f"Groq APIエラー: {str(e)}"}
 
 
-# ── レスポンスパーサー ─────────────────────────────
-def _parse_response(text: str) -> tuple[str, str]:
-    """
-    ---TRANSCRIPT--- / ---SUMMARY--- 区切りでテキストを分割する。
-    パースできない場合はテキスト全体を文字起こしとして扱う。
-    """
-    if "---TRANSCRIPT---" in text and "---SUMMARY---" in text:
-        parts     = text.split("---SUMMARY---")
-        summary   = parts[1].strip()
-        transcript = parts[0].replace("---TRANSCRIPT---", "").strip()
-        return transcript, summary
+# ── Whisper 文字起こし（リトライ付き） ────────────
+def _call_whisper(client: Groq, wav_path: Path) -> str:
+    for attempt in range(1, RETRY_COUNT + 1):
+        try:
+            with open(wav_path, "rb") as f:
+                response = client.audio.transcriptions.create(
+                    file=(wav_path.name, f.read()),
+                    model=WHISPER_MODEL,
+                    response_format="text",
+                    language="ja",
+                    temperature=0.0,
+                )
+            return response.strip() if isinstance(response, str) else response.text.strip()
+        except Exception as e:
+            if "429" in str(e) and attempt < RETRY_COUNT:
+                print(f"[transcriber] 429 レート制限 - {RETRY_WAIT}秒後にリトライ ({attempt}/{RETRY_COUNT})")
+                time.sleep(RETRY_WAIT)
+            else:
+                raise
 
-    # パース失敗時のフォールバック
-    print("[transcriber] レスポンスのパースに失敗しました。テキスト全体を文字起こしとして扱います。")
-    return text.strip(), "（要約を取得できませんでした）"
+
+# ── LLaMA 要約（リトライ付き） ────────────────────
+def _call_llama(client: Groq, transcript: str) -> str:
+    prompt = (
+        "以下の文字起こし内容を要約してください。\n\n"
+        f"【文字起こし】\n{transcript}\n\n"
+        "【要約の形式】\n"
+        "・重要なポイントを3〜5つの箇条書きでまとめてください。\n"
+        "・各ポイントは簡潔に1〜2文で記述してください。\n"
+        "・要約のみを出力してください（説明文は不要です）。"
+    )
+
+    for attempt in range(1, RETRY_COUNT + 1):
+        try:
+            response = client.chat.completions.create(
+                model=SUMMARY_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            if "429" in str(e) and attempt < RETRY_COUNT:
+                print(f"[transcriber] 429 レート制限 - {RETRY_WAIT}秒後にリトライ ({attempt}/{RETRY_COUNT})")
+                time.sleep(RETRY_WAIT)
+            else:
+                raise
 
 
 # ── faster-whisper（ビジネス用） ───────────────────

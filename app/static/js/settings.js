@@ -17,8 +17,8 @@ async function loadSettings() {
     if (!res.ok) return;
     const data = await res.json();
     selectMode(data.ai_mode || 'personal', false);
-    if (data.gemini_api_key) {
-      document.getElementById('apiKeyInput').value = data.gemini_api_key;
+    if (data.groq_api_key) {
+      document.getElementById('apiKeyInput').value = data.groq_api_key;
     }
   } catch (e) {
     // 設定未保存の場合はデフォルト値のまま
@@ -35,13 +35,13 @@ function selectMode(mode, showNotice = true) {
   if (mode === 'personal') {
     document.getElementById('card-personal').classList.add('active-personal');
     document.getElementById('businessNotice').classList.remove('visible');
-    document.getElementById('geminiSection').style.display = 'block';
+    document.getElementById('groqSection').style.display = 'block';
   } else {
     document.getElementById('card-business').classList.add('active-business');
     if (showNotice) {
       document.getElementById('businessNotice').classList.add('visible');
     }
-    document.getElementById('geminiSection').style.display = 'none';
+    document.getElementById('groqSection').style.display = 'none';
   }
 }
 
@@ -59,7 +59,7 @@ async function saveSettings() {
   const apiKey = document.getElementById('apiKeyInput').value.trim();
 
   if (currentMode === 'personal' && !apiKey) {
-    showToast('❌ Gemini APIキーを入力してください');
+    showToast('❌ Groq APIキーを入力してください');
     return;
   }
 
@@ -68,7 +68,7 @@ async function saveSettings() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       ai_mode: currentMode,
-      gemini_api_key: apiKey,
+      groq_api_key: apiKey,
     }),
   });
 

@@ -235,6 +235,18 @@ main.narrow { max-width: 640px; }
 
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
+.process-step.error { border-color: rgba(232,93,74,0.4); background: rgba(232,93,74,0.06); }
+.process-step.error .step-icon { background: rgba(232,93,74,0.2); color: var(--accent); }
+
+.error-detail {
+  margin-top: 8px; padding: 12px 16px;
+  background: rgba(232,93,74,0.08); border: 1px solid rgba(232,93,74,0.25);
+  border-radius: 12px; font-size: 12px; color: #FCA5A5; line-height: 1.6;
+  display: none;
+}
+
+.error-detail.visible { display: block; }
+
 /* 結果表示 */
 .result-section { margin-bottom: 40px; display: none; }
 .result-section.visible { display: block; }

@@ -95,15 +95,32 @@ async function runTranscribe(recordId) {
   const step1 = document.getElementById('step1');
   const step2 = document.getElementById('step2');
 
+  // エラー表示をリセット
+  const errorDetail = document.getElementById('transcribeError');
+  if (errorDetail) { errorDetail.classList.remove('visible'); errorDetail.textContent = ''; }
+
   processSection.classList.add('visible');
+  step1.classList.remove('error'); step2.classList.remove('error');
   step1.classList.add('active');
 
-  const res  = await fetch('/api/transcribe', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ record_id: recordId }),
-  });
-  const data = await res.json();
+  let data;
+  try {
+    const res = await fetch('/api/transcribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ record_id: recordId }),
+    });
+    data = await res.json();
+  } catch (e) {
+    showTranscribeError(step1, step2, 'ネットワークエラーが発生しました。サーバーが起動しているか確認してください。');
+    return;
+  }
+
+  if (data.status === 'error') {
+    showTranscribeError(step1, step2, data.message || 'エラーが発生しました。');
+    await loadHistory();
+    return;
+  }
 
   step1.classList.remove('active'); step1.classList.add('done');
   step1.querySelector('.step-icon').textContent = '✓';
@@ -124,6 +141,22 @@ async function runTranscribe(recordId) {
 
   await loadHistory();
   showToast('🎉 完了しました！');
+}
+
+function showTranscribeError(step1, step2, message) {
+  step1.classList.remove('active'); step1.classList.add('error');
+  step1.querySelector('.step-icon').textContent = '✕';
+  step1.querySelector('span').textContent = '処理に失敗しました';
+  step2.classList.add('error');
+  step2.querySelector('.step-icon').textContent = '–';
+  step2.querySelector('span').textContent = 'スキップ';
+
+  const errorDetail = document.getElementById('transcribeError');
+  if (errorDetail) {
+    errorDetail.textContent = '❌ ' + message;
+    errorDetail.classList.add('visible');
+  }
+  showToast('❌ ' + message);
 }
 
 // ── 過去データ一覧 ────────────────────────────────

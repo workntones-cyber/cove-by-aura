@@ -34,7 +34,7 @@
           <div class="mode-card-check">✓</div>
           <div class="mode-card-icon">👤</div>
           <div class="mode-card-name">個人用</div>
-          <div class="mode-card-engine">Gemini API</div>
+          <div class="mode-card-engine">Groq API</div>
           <div class="mode-card-desc">クラウド処理。高速・高精度。個人利用に最適。</div>
         </div>
         <div class="mode-card" id="card-business" onclick="selectMode('business')">
@@ -56,20 +56,20 @@
     </div>
   </div>
 
-  <!-- Gemini API設定 -->
-  <div class="settings-section" id="geminiSection">
-    <div class="settings-section-title">🔑 Gemini API 接続情報</div>
+  <!-- Groq API設定 -->
+  <div class="settings-section" id="groqSection">
+    <div class="settings-section-title">🔑 Groq API 接続情報</div>
     <div class="settings-card">
       <div class="api-key-row">
-        <input class="api-key-input" id="apiKeyInput" type="password" placeholder="AIzaSy..." />
+        <input class="api-key-input" id="apiKeyInput" type="password" placeholder="gsk_..." />
         <button class="api-key-toggle" onclick="toggleApiKeyVisibility()">表示</button>
       </div>
       <p style="font-size:11px;color:var(--muted);padding-bottom:12px;line-height:1.6;">
         APIキーは <code style="color:#9CA3AF;">.env</code> ファイルに保存されます。
         GitHubには一切アップロードされません。
-        <a href="https://aistudio.google.com/" target="_blank"
+        <a href="https://console.groq.com/keys" target="_blank"
           style="color:#7C6AF7;text-decoration:none;">
-          Google AI Studio で取得 →
+          Groq Console で取得 →
         </a>
       </p>
     </div>

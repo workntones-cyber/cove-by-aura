@@ -225,15 +225,15 @@ def _write_env(data: dict) -> None:
 def settings_get():
     """
     現在の設定を返す（APIキーはマスキング）。
-    Response: {"ai_mode": str, "gemini_api_key": str}
+    Response: {"ai_mode": str, "groq_api_key": str}
     """
     env = _read_env()
-    api_key = env.get("GEMINI_API_KEY", "")
+    api_key = env.get("GROQ_API_KEY", "")
     # 画面表示用に末尾4文字以外をマスク
     masked = ("*" * (len(api_key) - 4) + api_key[-4:]) if len(api_key) > 4 else api_key
     return jsonify({
         "ai_mode": env.get("AI_MODE", "personal"),
-        "gemini_api_key": masked,
+        "groq_api_key": masked,
     }), 200
 
 
@@ -241,17 +241,17 @@ def settings_get():
 def settings_save():
     """
     設定を `.env` ファイルに保存する。
-    Request JSON: {"ai_mode": str, "gemini_api_key": str}
+    Request JSON: {"ai_mode": str, "groq_api_key": str}
     Response: {"status": "saved"}
     """
     data = request.get_json(silent=True) or {}
     ai_mode    = data.get("ai_mode", "personal")
-    gemini_key = data.get("gemini_api_key", "").strip()
+    groq_key = data.get("groq_api_key", "").strip()
 
     save_data = {"AI_MODE": ai_mode}
     # キーが入力されていれば保存（マスク済みの場合は上書きしない）
-    if gemini_key and not gemini_key.startswith("*"):
-        save_data["GEMINI_API_KEY"] = gemini_key
+    if groq_key and not groq_key.startswith("*"):
+        save_data["GROQ_API_KEY"] = groq_key
 
     try:
         _write_env(save_data)
