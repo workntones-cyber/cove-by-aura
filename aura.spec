@@ -16,6 +16,21 @@ from pathlib import Path
 
 block_cipher = None
 
+# faster-whisper のアセットパスを動的に解決
+def _find_faster_whisper_assets():
+    """faster_whisper パッケージのアセットディレクトリを探す"""
+    try:
+        import faster_whisper
+        pkg_dir = Path(faster_whisper.__file__).parent
+        assets  = pkg_dir / "assets"
+        if assets.exists():
+            return [(str(assets), "faster_whisper/assets")]
+    except ImportError:
+        pass
+    return []
+
+_fw_assets = _find_faster_whisper_assets()
+
 a = Analysis(
     ['main.py'],
     pathex=[],
@@ -24,7 +39,7 @@ a = Analysis(
         # テンプレート・静的ファイルを同梱
         ('app/templates', 'app/templates'),
         ('app/static',    'app/static'),
-    ],
+    ] + _fw_assets,
     hiddenimports=[
         # Flask関連
         'flask',

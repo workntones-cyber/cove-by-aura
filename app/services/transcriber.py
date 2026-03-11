@@ -17,9 +17,10 @@ from groq import Groq
 import sys as _sys
 if getattr(_sys, "frozen", False):
     UPLOADS_DIR = Path(_sys.executable).resolve().parent / "uploads"
+    ENV_PATH    = Path(_sys.executable).resolve().parent / ".env"
 else:
     UPLOADS_DIR = Path(__file__).resolve().parent.parent.parent / "uploads"
-ENV_PATH           = Path(__file__).resolve().parent.parent.parent / ".env"
+    ENV_PATH    = Path(__file__).resolve().parent.parent.parent / ".env"
 WHISPER_MODEL      = "whisper-large-v3-turbo"   # 文字起こし用
 SUMMARY_MODEL      = "llama-3.3-70b-versatile"  # 要約用
 RETRY_COUNT        = 3

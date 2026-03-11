@@ -44,6 +44,15 @@ init_db()
 #  ページルーティング
 # ══════════════════════════════════════════════════
 
+@app.route("/favicon.ico")
+def favicon():
+    return send_from_directory(
+        str(BASE_DIR / "app" / "static"),
+        "aura.ico",
+        mimetype="image/x-icon"
+    )
+
+
 @app.route("/")
 def index():
     """メイン画面（録音・一覧）"""
@@ -278,8 +287,12 @@ if getattr(sys, "frozen", False):
 else:
     ENV_PATH = Path(__file__).resolve().parent / ".env"
 print(f"[main] ENV_PATH: {ENV_PATH}")
-print(f"[main] ENV_PATH exists: {ENV_PATH.exists()}")
 print(f"[main] frozen: {getattr(sys, 'frozen', False)}")
+# 起動時に .env が存在しない場合は空ファイルを作成
+if not ENV_PATH.exists():
+    ENV_PATH.write_text("AI_MODE=personal\nRECORDING_SOURCE=mic\n", encoding="utf-8")
+    print(f"[main] .env を新規作成しました")
+print(f"[main] ENV_PATH exists: {ENV_PATH.exists()}")
 
 def _read_env() -> dict:
     """`.env` ファイルを読み込んで辞書で返す"""
@@ -381,16 +394,33 @@ def _open_browser():
     webbrowser.open("http://127.0.0.1:5001")
 
 
+def _auto_preload_model():
+    """起動時にビジネス用モードなら自動でモデルをプリロードする"""
+    try:
+        env = _read_env()
+        if env.get("AI_MODE") == "business":
+            import platform as _platform
+            is_win = _platform.system() == "Windows"
+            is_arm = _platform.machine() in ("arm64", "aarch64")
+            if is_win or is_arm:
+                from app.services.transcriber import preload_model
+                preload_model()
+                print("[main] 起動時モデルプリロード開始")
+    except Exception as e:
+        print(f"[main] 起動時プリロードエラー: {e}")
+
 if __name__ == "__main__":
     # PyInstallerで固めた場合はデバッグ無効・自動リロード無効
     is_frozen = getattr(sys, "frozen", False)
 
     if not is_frozen:
         # 通常の開発時はデバッグモード
+        threading.Thread(target=_auto_preload_model, daemon=True).start()
         app.run(host="127.0.0.1", port=5001, debug=True)
     else:
         # 配布用：ブラウザを別スレッドで起動してからFlaskを起動
         print("AURA を起動しています...")
-        print("ブラウザが開かない場合は http://127.0.0.1:5000 にアクセスしてください")
+        print("ブラウザが開かない場合は http://127.0.0.1:5001 にアクセスしてください")
+        threading.Thread(target=_auto_preload_model, daemon=True).start()
         threading.Thread(target=_open_browser, daemon=True).start()
         app.run(host="127.0.0.1", port=5001, debug=False, use_reloader=False)

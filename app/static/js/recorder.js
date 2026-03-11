@@ -152,7 +152,6 @@ async function runTranscribe(recordId) {
     return;
   }
 
-  if (downloadNotice) downloadNotice.classList.remove('visible');
   step1.classList.remove('active'); step1.classList.add('done');
   step1.querySelector('.step-icon').textContent = '✓';
   step1.querySelector('span').textContent = '文字起こし完了';
