@@ -11,7 +11,7 @@ import sounddevice as sd
 SAMPLE_RATE = 16000       # Hz（音声認識最適）
 CHANNELS = 1              # モノラル（文字起こしに最適）
 DTYPE = "int16"           # 16bit PCM
-UPLOADS_DIR = Path(__file__).parent.parent / "uploads"
+UPLOADS_DIR = Path(__file__).resolve().parent.parent.parent / "uploads"
 
 # ── 状態管理 ──────────────────────────────────────
 _recording = False
