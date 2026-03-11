@@ -784,3 +784,15 @@ main.narrow { max-width: 640px; }
 
 .settings-notice-icon { min-width: 16px; text-align: center; }
 
+
+/* ── Mac ステップ チェックボックス ── */
+.mac-step-check-label {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-top: 10px; font-size: 12px; color: var(--muted);
+  cursor: pointer; user-select: none;
+}
+
+.mac-step-check-label input[type="checkbox"] {
+  width: 15px; height: 15px; cursor: pointer;
+  accent-color: var(--accent2);
+}

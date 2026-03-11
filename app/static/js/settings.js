@@ -201,23 +201,56 @@ async function loadDevices(selectedId) {
 // ── Mac: 設定画面でのBlackHole検出チェック ──────
 async function checkBlackHoleInSettings() {
   try {
-    const res     = await fetch('/api/devices');
-    const devices = await res.json();
+    const res      = await fetch('/api/devices');
+    const devices  = await res.json();
     const hasBlackHole = devices.some(d =>
       d.name.toLowerCase().includes('blackhole')
     );
 
-    const guideOk    = document.getElementById('macGuideOk');
-    const guideSteps = document.getElementById('macGuideSteps');
-
+    // Step1・2はBlackHole検出済みなら完了マーク
     if (hasBlackHole) {
-      if (guideOk)    guideOk.style.display    = 'block';
-      if (guideSteps) guideSteps.style.display  = 'none';
-    } else {
-      if (guideOk)    guideOk.style.display    = 'none';
-      if (guideSteps) guideSteps.style.display  = 'block';
+      markStepDone(1);
+      markStepDone(2);
+      // タイトルを更新
+      const title = document.getElementById('macGuideTitle');
+      if (title) {
+        title.innerHTML = '✅ <strong>BlackHole を検出しました。</strong>残りの手順を完了してください。';
+        title.style.color = '#6EE7B7';
+      }
     }
-  } catch (e) {
-    // 取得失敗時はステップガイドを表示
+
+    // Step3・4はチェックボックスの保存済み状態を復元
+    [3, 4].forEach(n => {
+      const saved = localStorage.getItem(`macStep${n}`) === 'true';
+      const cb    = document.getElementById(`checkStep${n}`);
+      if (cb) cb.checked = saved;
+      if (saved) markStepDone(n);
+    });
+
+  } catch (e) {}
+}
+
+function markStepDone(n) {
+  const numEl = document.getElementById(`macStepNum${n}`);
+  if (numEl) {
+    numEl.textContent   = '✓';
+    numEl.style.background = '#34D399';
+  }
+  const stepEl = document.getElementById(`macStep${n}`);
+  if (stepEl) stepEl.style.opacity = '0.6';
+}
+
+function saveMacStepCheck(n, checked) {
+  localStorage.setItem(`macStep${n}`, checked);
+  if (checked) markStepDone(n);
+  else {
+    // チェックを外したら元に戻す
+    const numEl = document.getElementById(`macStepNum${n}`);
+    if (numEl) {
+      numEl.textContent      = String(n);
+      numEl.style.background = '';
+    }
+    const stepEl = document.getElementById(`macStep${n}`);
+    if (stepEl) stepEl.style.opacity = '1';
   }
 }

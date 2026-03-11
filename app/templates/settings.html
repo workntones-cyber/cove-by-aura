@@ -107,19 +107,14 @@
         <!-- Mac向け案内 -->
         <div class="mac-guide" id="macGuide" style="display:none;">
 
-          <!-- BlackHole検出済み -->
-          <div class="mac-guide-ok" id="macGuideOk" style="display:none;">
-            ✅ <strong>BlackHole を検出しました。</strong>そのままご利用いただけます。
-          </div>
-
-          <!-- BlackHole未インストール時のステップガイド -->
+          <!-- ステップガイド（常時表示・完了状態はJSで制御） -->
           <div id="macGuideSteps">
-            <div class="mac-guide-title">
+            <div class="mac-guide-title" id="macGuideTitle">
               🖥️ Macでオンライン会議の音声を録音するには BlackHole が必要です
             </div>
 
-            <div class="mac-step">
-              <div class="mac-step-num">1</div>
+            <div class="mac-step" id="macStep1">
+              <div class="mac-step-num" id="macStepNum1">1</div>
               <div class="mac-step-body">
                 <div class="mac-step-title">BlackHole をダウンロード・インストール</div>
                 <div class="mac-step-desc">無料のシステム音声キャプチャドライバーです。<strong>「BlackHole 2ch」</strong>をダウンロードしてください。</div>
@@ -129,38 +124,46 @@
               </div>
             </div>
 
-            <div class="mac-step">
-              <div class="mac-step-num">2</div>
+            <div class="mac-step" id="macStep2">
+              <div class="mac-step-num" id="macStepNum2">2</div>
               <div class="mac-step-body">
                 <div class="mac-step-title">Macを再起動</div>
                 <div class="mac-step-desc">インストール後、必ず再起動してください。</div>
               </div>
             </div>
 
-            <div class="mac-step">
-              <div class="mac-step-num">3</div>
+            <div class="mac-step" id="macStep3">
+              <div class="mac-step-num" id="macStepNum3">3</div>
               <div class="mac-step-body">
                 <div class="mac-step-title">Audio MIDI設定で「複数出力装置」を作成</div>
                 <div class="mac-step-desc">
                   Finder →「アプリケーション」→「ユーティリティ」→「Audio MIDI設定」を開く。<br>
                   左下の「＋」→「複数出力装置を作成」→「BlackHole 2ch」と使用中のスピーカーの両方にチェック。
                 </div>
+                <label class="mac-step-check-label">
+                  <input type="checkbox" id="checkStep3" onchange="saveMacStepCheck(3, this.checked)">
+                  完了した
+                </label>
               </div>
             </div>
 
-            <div class="mac-step">
-              <div class="mac-step-num">4</div>
+            <div class="mac-step" id="macStep4">
+              <div class="mac-step-num" id="macStepNum4">4</div>
               <div class="mac-step-body">
-                <div class="mac-step-title">システム環境設定でサウンド出力を切り替え</div>
+                <div class="mac-step-title">システム設定でサウンド出力を切り替え</div>
                 <div class="mac-step-desc">
                   「システム設定」→「サウンド」→ 出力を「複数出力装置」に変更。<br>
                   これでスピーカーから音を聞きながらAURAで録音できます。
                 </div>
+                <label class="mac-step-check-label">
+                  <input type="checkbox" id="checkStep4" onchange="saveMacStepCheck(4, this.checked)">
+                  完了した
+                </label>
               </div>
             </div>
 
-            <div class="mac-step">
-              <div class="mac-step-num">5</div>
+            <div class="mac-step" id="macStep5">
+              <div class="mac-step-num" id="macStepNum5">5</div>
               <div class="mac-step-body">
                 <div class="mac-step-title">AURAを再起動して完了</div>
                 <div class="mac-step-desc">再起動後、BlackHoleが自動で検出されます。</div>
