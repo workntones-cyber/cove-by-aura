@@ -14,12 +14,11 @@ from google import genai
 from google.genai import types
 
 # ── 設定 ──────────────────────────────────────────
-UPLOADS_DIR  = Path(__file__).resolve().parent.parent.parent / "uploads"
-ENV_PATH     = Path(__file__).resolve().parent.parent.parent / ".env"
-MODEL_NAME   = "gemini-2.0-flash"
-RETRY_COUNT  = 3    # リトライ回数
-RETRY_WAIT   = 20   # 429エラー時のリトライ間隔（秒）
-REQUEST_WAIT = 2    # 文字起こし→要約間のウェイト（秒）
+UPLOADS_DIR = Path(__file__).resolve().parent.parent.parent / "uploads"
+ENV_PATH    = Path(__file__).resolve().parent.parent.parent / ".env"
+MODEL_NAME  = "gemini-2.0-flash"
+RETRY_COUNT = 3     # リトライ回数
+RETRY_WAIT  = 30    # 429エラー時のリトライ間隔（秒）
 
 
 # ── .env 読み込み ─────────────────────────────────
@@ -82,7 +81,10 @@ def _call_gemini(client, contents: list) -> str:
 def _transcribe_gemini(wav_filename: str, env: dict) -> dict:
     api_key = env.get("GEMINI_API_KEY", "").strip()
     if not api_key:
-        return {"status": "error", "message": "Gemini APIキーが設定されていません。設定画面で入力してください。"}
+        return {
+            "status": "error",
+            "message": "Gemini APIキーが設定されていません。設定画面で入力してください。",
+        }
 
     wav_path = UPLOADS_DIR / wav_filename
     if not wav_path.exists():
@@ -92,34 +94,30 @@ def _transcribe_gemini(wav_filename: str, env: dict) -> dict:
         client      = genai.Client(api_key=api_key)
         audio_bytes = wav_path.read_bytes()
 
-        # ── ① 文字起こし ──────────────────────────
-        transcript_prompt = (
-            "この音声を正確に文字起こししてください。\n"
-            "・話し言葉をそのまま書き起こしてください。\n"
-            "・句読点を適切に追加してください。\n"
-            "・文字起こし結果のみを出力してください（説明文は不要です）。"
+        # ── 文字起こし & 要約を1回のAPIコールで取得 ──
+        # APIコールを1回にまとめることでレート制限を回避する
+        prompt = (
+            "以下の音声に対して、2つのタスクを実行してください。\n\n"
+            "【タスク1: 文字起こし】\n"
+            "音声を正確に文字起こしし、話し言葉をそのまま書き起こしてください。句読点を適切に追加してください。\n\n"
+            "【タスク2: 要約】\n"
+            "文字起こし内容の重要なポイントを3〜5つの箇条書きでまとめてください。各ポイントは簡潔に1〜2文で記述してください。\n\n"
+            "以下の形式で出力してください（この形式を厳守してください）：\n"
+            "---TRANSCRIPT---\n"
+            "（文字起こし内容）\n"
+            "---SUMMARY---\n"
+            "（要約内容）"
         )
 
-        transcript = _call_gemini(client, [
-            transcript_prompt,
+        result_text = _call_gemini(client, [
+            prompt,
             types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav"),
         ])
+
+        # レスポンスをパース
+        transcript, ai_summary = _parse_response(result_text)
+
         print(f"[transcriber] 文字起こし完了: {len(transcript)}文字")
-
-        # リクエスト間のウェイト（レート制限対策）
-        time.sleep(REQUEST_WAIT)
-
-        # ── ② AI要約 ──────────────────────────────
-        summary_prompt = (
-            f"以下の文字起こし内容を要約してください。\n\n"
-            f"【文字起こし】\n{transcript}\n\n"
-            f"【要約の形式】\n"
-            f"・重要なポイントを3〜5つの箇条書きでまとめてください。\n"
-            f"・各ポイントは簡潔に1〜2文で記述してください。\n"
-            f"・要約のみを出力してください（説明文は不要です）。"
-        )
-
-        ai_summary = _call_gemini(client, [summary_prompt])
         print(f"[transcriber] 要約完了: {len(ai_summary)}文字")
 
         return {
@@ -131,6 +129,23 @@ def _transcribe_gemini(wav_filename: str, env: dict) -> dict:
     except Exception as e:
         print(f"[transcriber] Gemini エラー: {e}")
         return {"status": "error", "message": f"Gemini APIエラー: {str(e)}"}
+
+
+# ── レスポンスパーサー ─────────────────────────────
+def _parse_response(text: str) -> tuple[str, str]:
+    """
+    ---TRANSCRIPT--- / ---SUMMARY--- 区切りでテキストを分割する。
+    パースできない場合はテキスト全体を文字起こしとして扱う。
+    """
+    if "---TRANSCRIPT---" in text and "---SUMMARY---" in text:
+        parts     = text.split("---SUMMARY---")
+        summary   = parts[1].strip()
+        transcript = parts[0].replace("---TRANSCRIPT---", "").strip()
+        return transcript, summary
+
+    # パース失敗時のフォールバック
+    print("[transcriber] レスポンスのパースに失敗しました。テキスト全体を文字起こしとして扱います。")
+    return text.strip(), "（要約を取得できませんでした）"
 
 
 # ── faster-whisper（ビジネス用） ───────────────────
