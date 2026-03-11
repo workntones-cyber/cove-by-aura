@@ -7,16 +7,19 @@ AIモードに応じて以下を切り替える：
   - business  : faster-whisper（完全ローカル）※ Phase 3後半で実装
 """
 
-import os
+import time
 from pathlib import Path
 
 from google import genai
 from google.genai import types
 
 # ── 設定 ──────────────────────────────────────────
-UPLOADS_DIR = Path(__file__).resolve().parent.parent.parent / "uploads"
-ENV_PATH    = Path(__file__).resolve().parent.parent.parent / ".env"
-MODEL_NAME  = "gemini-2.0-flash"
+UPLOADS_DIR  = Path(__file__).resolve().parent.parent.parent / "uploads"
+ENV_PATH     = Path(__file__).resolve().parent.parent.parent / ".env"
+MODEL_NAME   = "gemini-2.0-flash"
+RETRY_COUNT  = 3    # リトライ回数
+RETRY_WAIT   = 20   # 429エラー時のリトライ間隔（秒）
+REQUEST_WAIT = 2    # 文字起こし→要約間のウェイト（秒）
 
 
 # ── .env 読み込み ─────────────────────────────────
@@ -42,16 +45,8 @@ def transcribe_and_summarize(wav_filename: str) -> dict:
         wav_filename: uploads/ 配下のファイル名（例: aura_20260101_120000.wav）
 
     Returns:
-        {
-            "status": "done",
-            "transcript": str,
-            "ai_summary": str,
-        }
-        or
-        {
-            "status": "error",
-            "message": str,
-        }
+        {"status": "done", "transcript": str, "ai_summary": str}
+        or {"status": "error", "message": str}
     """
     env     = _read_env()
     ai_mode = env.get("AI_MODE", "personal")
@@ -60,6 +55,27 @@ def transcribe_and_summarize(wav_filename: str) -> dict:
         return _transcribe_faster_whisper(wav_filename)
     else:
         return _transcribe_gemini(wav_filename, env)
+
+
+# ── Gemini APIリクエスト（リトライ付き） ──────────
+def _call_gemini(client, contents: list) -> str:
+    """
+    429エラー時に RETRY_WAIT 秒待ってリトライする。
+    RETRY_COUNT 回失敗したら例外を raise する。
+    """
+    for attempt in range(1, RETRY_COUNT + 1):
+        try:
+            response = client.models.generate_content(
+                model=MODEL_NAME,
+                contents=contents,
+            )
+            return response.text.strip()
+        except Exception as e:
+            if "429" in str(e) and attempt < RETRY_COUNT:
+                print(f"[transcriber] 429 レート制限 - {RETRY_WAIT}秒後にリトライ ({attempt}/{RETRY_COUNT})")
+                time.sleep(RETRY_WAIT)
+            else:
+                raise
 
 
 # ── Gemini API（個人用） ───────────────────────────
@@ -73,9 +89,7 @@ def _transcribe_gemini(wav_filename: str, env: dict) -> dict:
         return {"status": "error", "message": f"音声ファイルが見つかりません: {wav_filename}"}
 
     try:
-        client = genai.Client(api_key=api_key)
-
-        # WAVファイルをバイト列として読み込む
+        client      = genai.Client(api_key=api_key)
         audio_bytes = wav_path.read_bytes()
 
         # ── ① 文字起こし ──────────────────────────
@@ -86,17 +100,14 @@ def _transcribe_gemini(wav_filename: str, env: dict) -> dict:
             "・文字起こし結果のみを出力してください（説明文は不要です）。"
         )
 
-        transcript_response = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=[
-                transcript_prompt,
-                types.Part.from_bytes(
-                    data=audio_bytes,
-                    mime_type="audio/wav",
-                ),
-            ],
-        )
-        transcript = transcript_response.text.strip()
+        transcript = _call_gemini(client, [
+            transcript_prompt,
+            types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav"),
+        ])
+        print(f"[transcriber] 文字起こし完了: {len(transcript)}文字")
+
+        # リクエスト間のウェイト（レート制限対策）
+        time.sleep(REQUEST_WAIT)
 
         # ── ② AI要約 ──────────────────────────────
         summary_prompt = (
@@ -108,14 +119,8 @@ def _transcribe_gemini(wav_filename: str, env: dict) -> dict:
             f"・要約のみを出力してください（説明文は不要です）。"
         )
 
-        summary_response = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=[summary_prompt],
-        )
-        ai_summary = summary_response.text.strip()
-
-        print(f"[transcriber] Gemini 文字起こし完了: {len(transcript)}文字")
-        print(f"[transcriber] Gemini 要約完了: {len(ai_summary)}文字")
+        ai_summary = _call_gemini(client, [summary_prompt])
+        print(f"[transcriber] 要約完了: {len(ai_summary)}文字")
 
         return {
             "status": "done",
@@ -132,7 +137,7 @@ def _transcribe_gemini(wav_filename: str, env: dict) -> dict:
 def _transcribe_faster_whisper(wav_filename: str) -> dict:
     """
     faster-whisper を使ったローカル文字起こし。
-    Phase 3後半で実装予定。現時点ではエラーメッセージを返す。
+    Phase 3後半で実装予定。
     """
     # TODO: Phase 3後半で実装
     # from faster_whisper import WhisperModel
