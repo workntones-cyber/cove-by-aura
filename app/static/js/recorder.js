@@ -19,6 +19,7 @@ const speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
 document.addEventListener('DOMContentLoaded', () => {
   buildVisualizer();
   loadHistory();
+  checkApiKey();
 
   document.addEventListener('mousemove', e => {
     if (!isDragging || dragId === null) return;
@@ -26,6 +27,30 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   document.addEventListener('mouseup', () => { isDragging = false; dragId = null; });
 });
+
+// ── APIキーチェック ───────────────────────────────
+async function checkApiKey() {
+  try {
+    const res  = await fetch('/api/settings');
+    const data = await res.json();
+
+    // ビジネス用モードはAPIキー不要
+    if (data.ai_mode === 'business') return;
+
+    // 個人用モードでAPIキー未設定の場合
+    if (!data.has_groq_key) {
+      // バナーを表示
+      document.getElementById('apiWarningBanner').style.display = 'flex';
+      // 録音ボタンを無効化
+      const btn = document.getElementById('recordBtn');
+      btn.disabled = true;
+      btn.title = 'APIキーを設定してください';
+      document.getElementById('recordLabel').textContent = '設定画面でAPIキーを入力してください';
+    }
+  } catch (e) {
+    // 設定取得失敗時は何もしない
+  }
+}
 
 // ── 波形ビジュアライザー ──────────────────────────
 function buildVisualizer() {

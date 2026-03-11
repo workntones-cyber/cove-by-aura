@@ -251,6 +251,7 @@ def settings_get():
     return jsonify({
         "ai_mode": env.get("AI_MODE", "personal"),
         "groq_api_key": masked,
+        "has_groq_key": bool(api_key),  # APIキー登録済みかどうか
     }), 200
 
 

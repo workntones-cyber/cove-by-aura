@@ -20,6 +20,16 @@
 
 <main>
 
+  <!-- APIキー未設定バナー -->
+  <div class="api-warning-banner" id="apiWarningBanner" style="display:none;">
+    <div class="api-warning-icon">⚠️</div>
+    <div class="api-warning-text">
+      <strong>APIキーが設定されていません</strong><br>
+      録音はできますが、文字起こし・要約には Groq APIキーが必要です。
+      <a href="/settings" class="api-warning-link">設定画面で入力する →</a>
+    </div>
+  </div>
+
   <!-- タイトル・メモ入力 -->
   <div class="meta-section">
     <label>タイトル</label>
