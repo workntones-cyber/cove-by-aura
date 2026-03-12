@@ -335,7 +335,7 @@ aura/
 ### 開発環境のセットアップ
 
 ```bash
-git clone https://github.com/yourusername/aura.git
+git clone https://github.com/workntones-cyber/aura.git
 cd aura
 uv sync
 cp .env.example .env
