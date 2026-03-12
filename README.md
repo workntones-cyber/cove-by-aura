@@ -171,7 +171,7 @@ uv --version
 ### 1. リポジトリをクローン
 
 ```bash
-git clone https://github.com/yourusername/aura.git
+git clone https://github.com/workntones-cyber/aura.git
 cd aura
 ```
 
