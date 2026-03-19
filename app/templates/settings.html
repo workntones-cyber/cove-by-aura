@@ -58,6 +58,29 @@
     </div>
   </div>
 
+  <!-- Ollamaモデル設定 -->
+  <div class="settings-section" id="ollamaSection" style="display:none;">
+    <div class="settings-section-title">🤖 Ollama モデル設定</div>
+    <div class="settings-card">
+      <p style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.6;">
+        要約に使用するモデルを選択してください。モデルが大きいほど精度が上がりますが処理時間が増えます。<br>
+        モデルは事前に <code style="color:#9CA3AF;">ollama pull モデル名</code> でダウンロードが必要です。
+      </p>
+      <select class="api-key-input" id="ollamaModelSelect" style="cursor:pointer;">
+        <option value="llama3.1:8b">llama3.1:8b（約5GB・標準）</option>
+        <option value="gemma3:27b">gemma3:27b（約17GB・高品質・日本語得意）</option>
+        <option value="llama3.3:70b">llama3.3:70b（約40GB・最高品質 ※要ダウンロード）</option>
+      </select>
+      <p style="font-size:11px;color:var(--muted);margin-top:4px;">
+        ⚠️ 選択したモデルが未ダウンロードの場合はエラーになります。<br>
+        事前に <code style="color:#9CA3AF;">ollama pull モデル名</code> でダウンロードしてください。
+      </p>
+      <p style="font-size:11px;color:var(--muted);margin-top:8px;">
+        ⚠️ 変更後は「設定を保存」してください。
+      </p>
+    </div>
+  </div>
+
   <!-- Groq API設定 -->
   <div class="settings-section" id="groqSection">
     <div class="settings-section-title">🔑 Groq API 接続情報</div>

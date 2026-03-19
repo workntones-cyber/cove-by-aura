@@ -171,7 +171,7 @@ async function runTranscribe(recordId) {
   } catch (e) {}
   await new Promise(r => setTimeout(r, 300));
   step2.classList.remove('active'); step2.classList.add('done');
-  step2.querySelector('.step-icon').textContent = isBusinessMode ? '–' : '✓';
+  step2.querySelector('.step-icon').textContent = '✓';
   step2.querySelector('span').textContent = isBusinessMode ? '要約スキップ（Ollama導入後に対応予定）' : 'AI要約完了';
 
   document.getElementById('transcriptBody').textContent = data.transcript;
@@ -317,7 +317,13 @@ async function loadHistory() {
             </div>` : ''}
         ` : ''}
 
+        <div class="extra-prompt-row">
+          <input class="extra-prompt-input" id="extra-prompt-${r.id}"
+            placeholder="追加指示（例：技術的な専門用語を優先して記載してください）" />
+        </div>
         <div class="history-actions">
+          ${r.transcript_status !== 'done' ? `<button class="btn btn-retry" onclick="retryTranscribe(${r.id})">🔄 文字起こし</button>` : ''}
+          ${r.transcript_status === 'done' ? `<button class="btn btn-retry" onclick="retrySummary(${r.id})">🔄 再要約</button>` : ''}
           <button class="btn btn-save"   onclick="saveHistory(${r.id})">💾 保存</button>
           <button class="btn btn-delete" onclick="deleteHistory(${r.id})">🗑️ 削除</button>
         </div>
@@ -595,6 +601,75 @@ function restoreInputs() {
   });
   memoEl.addEventListener('input', () => {
     sessionStorage.setItem('aura_memo', memoEl.value);
+  });
+}
+
+// ── 文字起こし・要約の再実行 ─────────────────────
+async function retryTranscribe(recordId) {
+  if (!confirm('文字起こしと要約を再実行しますか？')) return;
+  setRetryLoading(recordId, '文字起こし', true);
+  try {
+    const res  = await fetch('/api/transcribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ record_id: recordId }),
+    });
+    const data = await res.json();
+    if (data.status === 'done') {
+      showToast('✅ 文字起こし・要約が完了しました');
+      await loadHistory();
+    } else {
+      setRetryLoading(recordId, '文字起こし', false);
+      showToast('❌ 失敗: ' + (data.message || 'エラーが発生しました'));
+    }
+  } catch (e) {
+    setRetryLoading(recordId, '文字起こし', false);
+    showToast('❌ ネットワークエラーが発生しました');
+  }
+}
+
+async function retrySummary(recordId) {
+  if (!confirm('要約を再実行しますか？')) return;
+  const extraPromptEl = document.getElementById(`extra-prompt-${recordId}`);
+  const extraPrompt   = extraPromptEl ? extraPromptEl.value.trim() : '';
+  setRetryLoading(recordId, '要約', true);
+  try {
+    const res  = await fetch('/api/summarize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ record_id: recordId, extra_prompt: extraPrompt }),
+    });
+    const data = await res.json();
+    if (data.status === 'done') {
+      showToast('✅ 要約が完了しました');
+      await loadHistory();
+    } else {
+      setRetryLoading(recordId, '要約', false);
+      showToast('❌ 失敗: ' + (data.message || 'エラーが発生しました'));
+    }
+  } catch (e) {
+    setRetryLoading(recordId, '要約', false);
+    showToast('❌ ネットワークエラーが発生しました');
+  }
+}
+
+function setRetryLoading(recordId, label, isLoading) {
+  // ボタンをローディング状態に切り替え
+  const item = document.getElementById(`history-${recordId}`);
+  if (!item) return;
+  const btns = item.querySelectorAll('.btn-retry');
+  btns.forEach(btn => {
+    if (isLoading) {
+      btn.disabled = true;
+      btn.textContent = `⏳ ${label}中...`;
+      btn.style.opacity = '0.6';
+      btn.style.cursor  = 'not-allowed';
+    } else {
+      btn.disabled = false;
+      btn.textContent = `🔄 ${label}`;
+      btn.style.opacity = '';
+      btn.style.cursor  = '';
+    }
   });
 }
 

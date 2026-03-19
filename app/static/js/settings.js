@@ -25,6 +25,9 @@ async function loadSettings() {
       document.getElementById('apiKeyInput').value = data.groq_api_key;
     }
 
+    // Ollamaモデル一覧を取得して反映
+    await loadOllamaModels(data.ollama_model || 'llama3.1:8b');
+
     // 録音ソースを反映
     const recSource = data.recording_source || 'mic';
     selectRecSource(recSource, false);
@@ -47,12 +50,14 @@ function selectMode(mode, showNotice = true) {
     document.getElementById('card-personal').classList.add('active-personal');
     document.getElementById('businessNotice').classList.remove('visible');
     document.getElementById('groqSection').style.display = 'block';
+    document.getElementById('ollamaSection').style.display = 'none';
   } else {
     document.getElementById('card-business').classList.add('active-business');
     if (showNotice) {
       document.getElementById('businessNotice').classList.add('visible');
     }
     document.getElementById('groqSection').style.display = 'none';
+    document.getElementById('ollamaSection').style.display = 'block';
   }
 }
 
@@ -81,6 +86,7 @@ async function saveSettings() {
       ai_mode:          currentMode,
       groq_api_key:     apiKey,
       recording_source: currentRecSource,
+      ollama_model:     (document.getElementById('ollamaModelSelect') || {}).value || 'llama3.1:8b',
     }),
   });
 
@@ -103,6 +109,40 @@ async function saveSettings() {
   } else {
     showToast('❌ 保存に失敗しました');
   }
+}
+
+// ── Ollamaモデル一覧を動的取得 ────────────────────
+async function loadOllamaModels(currentModel) {
+  const sel = document.getElementById('ollamaModelSelect');
+  if (!sel) return;
+  try {
+    const res  = await fetch('/api/ollama/models');
+    const data = await res.json();
+    if (data.models && data.models.length > 0) {
+      sel.innerHTML = data.models.map(m =>
+        `<option value="${m}" ${m === currentModel ? 'selected' : ''}>${getModelLabel(m)}</option>`
+      ).join('');
+    } else {
+      sel.innerHTML = `<option value="${currentModel}">${currentModel}</option>`;
+    }
+  } catch (e) {
+    sel.innerHTML = `<option value="${currentModel}">${currentModel}</option>`;
+  }
+}
+
+// ── Ollamaモデルの表示名変換 ──────────────────────
+function getModelLabel(modelName) {
+  const labels = {
+    'llama3.1:8b':  '標準モード（処理が速い）',
+    'llama3.1:70b': '高精度モード（処理に時間がかかる）',
+    'llama3.3:70b': '高精度モード・最新版（処理に時間がかかる）',
+    'gemma3:27b':   '高精度モード・日本語特化（処理に時間がかかる）',
+    'gemma3:12b':   'バランスモード・日本語特化',
+    'gemma3:4b':    '軽量モード・日本語特化（処理が速い）',
+    'mistral:7b':   '標準モード',
+    'mixtral:8x7b': '高精度モード',
+  };
+  return labels[modelName] || modelName;
 }
 
 // ── モデルダウンロード進捗 ────────────────────────

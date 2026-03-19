@@ -4,7 +4,7 @@ transcriber.py
 
 AIモードに応じて以下を切り替える：
   - personal  : Groq API（Whisper文字起こし + LLaMA要約）
-  - business  : faster-whisper（完全ローカル）※ Phase 3後半で実装
+  - business  : faster-whisper（文字起こし）+ Ollama（要約）完全ローカル
 """
 
 import sys
@@ -42,7 +42,7 @@ def _read_env() -> dict:
 
 
 # ── メイン関数 ────────────────────────────────────
-def transcribe_and_summarize(wav_filename: str) -> dict:
+def transcribe_and_summarize(wav_filename: str, extra_prompt: str = "") -> dict:
     """
     WAVファイルを文字起こし & AI要約する。
 
@@ -57,7 +57,7 @@ def transcribe_and_summarize(wav_filename: str) -> dict:
     ai_mode = env.get("AI_MODE", "personal")
 
     if ai_mode == "business":
-        return _transcribe_faster_whisper(wav_filename)
+        return _transcribe_faster_whisper(wav_filename, extra_prompt)
     else:
         return _transcribe_groq(wav_filename, env)
 
@@ -305,7 +305,64 @@ def _get_whisper_model():
     return _whisper_model
 
 
-def _transcribe_faster_whisper(wav_filename: str) -> dict:
+
+def _get_ollama_model() -> str:
+    """使用するOllamaモデルを.envから取得（未設定時はllama3.1:8b）"""
+    return _read_env().get("OLLAMA_MODEL", "llama3.1:8b")
+
+def _summarize_ollama(transcript: str, extra_prompt: str = "") -> str:
+    """
+    Ollamaを使ってローカルで要約する。
+    完全ローカル処理のため音声データは外部に送信されない。
+    """
+    import urllib.request
+    import json
+
+    prompt = (
+        "あなたは経験豊富な議事録作成の専門家です。\n"
+        "以下のテキストは実際の会議を録音して文字起こししたものです。\n\n"
+        "この会議の文字起こしには以下のような発言が混在しています：\n"
+        "・参加者からの質問と、それに対する回答\n"
+        "・各参加者の意見・主張・提案\n"
+        "・議題に対する賛成・反対・懸念の表明\n"
+        "・議論を経て生まれた決定や合意\n"
+        "・数字・データ・固有名詞を含む具体的な発言\n\n"
+        "これらの発言の種類を正確に区別し、会議の流れと結論が明確にわかる議事録を作成してください。\n\n"
+        "【議事録の形式】\n"
+        "## 会議の概要\n"
+        "（目的・テーマ・参加者・雰囲気を簡潔に）\n\n"
+        "## 議題と議論の内容\n"
+        "（各議題について「提起された問題・意見・質問→回答・議論の流れ→結論」の形で記載）\n\n"
+        "## 決定事項\n"
+        "（会議で合意・決定したことをすべて記載。なければ「特になし」）\n\n"
+        "## アクションアイテム\n"
+        "（誰が・何を・いつまでにするか。なければ「特になし」）\n\n"
+        "## 未解決事項・次回への申し送り\n"
+        "（結論が出なかった議題・継続検討事項。なければ「特になし」）\n\n"
+        "数字・固有名詞・日付・金額は正確に記載してください。\n"
+        "議事録のみを出力してください（前置き・説明文は不要です）。\n\n"
+        + (f"【追加指示】\n{extra_prompt}\n\n" if extra_prompt else "")
+        + f"【会議の文字起こし】\n{transcript}"
+    )
+
+    payload = json.dumps({
+        "model":  _get_ollama_model(),
+        "prompt": prompt,
+        "stream": False,
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        "http://127.0.0.1:11434/api/generate",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    with urllib.request.urlopen(req, timeout=None) as res:  # タイムアウトなし
+        data = json.loads(res.read().decode("utf-8"))
+        return data.get("response", "").strip()
+
+def _transcribe_faster_whisper(wav_filename: str, extra_prompt: str = "") -> dict:
     """
     faster-whisper を使ったローカル文字起こし & LLaMAで要約。
     GPU(CUDA)が使えれば自動でGPU処理、なければCPU処理にフォールバック。
@@ -319,10 +376,17 @@ def _transcribe_faster_whisper(wav_filename: str) -> dict:
 
         # ── ① 文字起こし ──────────────────────────
         print(f"[transcriber] faster-whisper 文字起こし開始: {wav_filename}")
+        # 文字起こし精度向上のための事前情報プロンプト
+        initial_prompt = (
+            "これは会議・打ち合わせの録音です。"
+            "複数の参加者による質疑応答、意見交換、議論が含まれています。"
+            "専門用語・固有名詞・数字を正確に文字起こしてください。"
+        )
         segments, info = model.transcribe(
             str(wav_path),
             language="ja",
             beam_size=5,
+            initial_prompt=initial_prompt,
             vad_filter=True,       # 無音区間をスキップして高速化
             vad_parameters={"min_silence_duration_ms": 500},
         )
@@ -332,11 +396,14 @@ def _transcribe_faster_whisper(wav_filename: str) -> dict:
         if not transcript:
             return {"status": "error", "message": "文字起こし結果が空でした（無音または認識できませんでした）"}
 
-        # ── ② 要約 ────────────────────────────────
-        # ビジネス用モードでは完全ローカル処理のため要約はスキップ
-        # （Ollama導入後にローカル要約を実装予定）
-        ai_summary = "（ビジネス用モードでは現在要約は行いません。Ollama導入後に対応予定です）"
-        print("[transcriber] ビジネス用モード：要約スキップ（完全ローカル処理のため）")
+        # ── ② 要約（Ollama ローカル） ─────────────
+        print("[transcriber] Ollama で要約開始（完全ローカル処理）")
+        try:
+            ai_summary = _summarize_ollama(transcript, extra_prompt)
+            print(f"[transcriber] Ollama 要約完了: {len(ai_summary)}文字")
+        except Exception as e:
+            print(f"[transcriber] Ollama 要約エラー: {e}")
+            ai_summary = "（要約に失敗しました。Ollamaが起動しているか確認してください）"
 
         return {
             "status":     "done",

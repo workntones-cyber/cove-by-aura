@@ -154,8 +154,9 @@ def transcribe():
     if not record:
         return jsonify({"status": "error", "message": "データが見つかりません"}), 404
 
+    extra_prompt = data.get("extra_prompt", "").strip()
     from app.services.transcriber import transcribe_and_summarize
-    result = transcribe_and_summarize(record["wav_file"])
+    result = transcribe_and_summarize(record["wav_file"], extra_prompt)
 
     if result["status"] == "error":
         return jsonify(result), 500
@@ -344,6 +345,7 @@ def settings_get():
         "has_groq_key":        bool(api_key),
         "recording_source":    env.get("RECORDING_SOURCE", "mic"),
         "recording_device_id": env.get("RECORDING_DEVICE_ID", ""),
+        "ollama_model":        env.get("OLLAMA_MODEL", "llama3.1:8b"),
     }), 200
 
 
@@ -360,7 +362,10 @@ def settings_save():
     device_id = data.get("recording_device_id", "")
     rec_source = data.get("recording_source", "mic")
 
+    ollama_model = data.get("ollama_model", "").strip()
     save_data = {"AI_MODE": ai_mode, "RECORDING_SOURCE": rec_source}
+    if ollama_model:
+        save_data["OLLAMA_MODEL"] = ollama_model
     # キーが入力されていれば保存（マスク済みの場合は上書きしない）
     if groq_key and not groq_key.startswith("*"):
         save_data["GROQ_API_KEY"] = groq_key
@@ -384,6 +389,21 @@ def settings_save():
 
 
 
+
+@app.route("/api/ollama/models", methods=["GET"])
+def ollama_models():
+    """Ollamaにインストール済みのモデル一覧を返す"""
+    import urllib.request
+    import json
+    try:
+        req = urllib.request.Request("http://127.0.0.1:11434/api/tags")
+        with urllib.request.urlopen(req, timeout=3) as res:
+            data = json.loads(res.read().decode("utf-8"))
+            models = [m["name"] for m in data.get("models", [])]
+            return jsonify({"status": "ok", "models": models}), 200
+    except Exception:
+        return jsonify({"status": "error", "models": []}), 200
+
 @app.route("/api/ollama/status", methods=["GET"])
 def ollama_status():
     """Ollamaの起動状態を確認する"""
@@ -393,6 +413,32 @@ def ollama_status():
         return jsonify({"status": "running"}), 200
     except Exception:
         return jsonify({"status": "not_running"}), 200
+
+
+@app.route("/api/summarize", methods=["POST"])
+def summarize_only():
+    """文字起こし済みのレコードに対して要約のみ再実行する"""
+    data      = request.get_json(silent=True) or {}
+    record_id = data.get("record_id")
+
+    if not record_id:
+        return jsonify({"status": "error", "message": "record_id が必要です"}), 400
+
+    record = get_recording(record_id)
+    if not record:
+        return jsonify({"status": "error", "message": "データが見つかりません"}), 404
+
+    if not record.get("transcript"):
+        return jsonify({"status": "error", "message": "文字起こしデータがありません"}), 400
+
+    try:
+        extra_prompt = data.get("extra_prompt", "").strip()
+        from app.services.transcriber import _summarize_ollama
+        ai_summary = _summarize_ollama(record["transcript"], extra_prompt)
+        update_transcript_and_summary(record_id, record["transcript"], ai_summary)
+        return jsonify({"status": "done", "ai_summary": ai_summary}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"要約エラー: {str(e)}"}), 500
 
 @app.route("/api/model/status", methods=["GET"])
 def model_status():

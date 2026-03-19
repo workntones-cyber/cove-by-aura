@@ -27,15 +27,46 @@ def init_db() -> None:
     with get_connection() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS recordings (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                title       TEXT    NOT NULL DEFAULT '無題',
-                memo        TEXT    NOT NULL DEFAULT '',
-                transcript  TEXT    NOT NULL DEFAULT '',
-                ai_summary  TEXT    NOT NULL DEFAULT '',
-                wav_file    TEXT    NOT NULL DEFAULT '',
-                created_at  TEXT    NOT NULL,
-                updated_at  TEXT    NOT NULL
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                title               TEXT    NOT NULL DEFAULT '無題',
+                memo                TEXT    NOT NULL DEFAULT '',
+                transcript          TEXT    NOT NULL DEFAULT '',
+                ai_summary          TEXT    NOT NULL DEFAULT '',
+                wav_file            TEXT    NOT NULL DEFAULT '',
+                transcript_status   TEXT    NOT NULL DEFAULT 'pending',
+                summary_status      TEXT    NOT NULL DEFAULT 'pending',
+                created_at          TEXT    NOT NULL,
+                updated_at          TEXT    NOT NULL
             )
+        """)
+        # 既存DBへのマイグレーション（カラムがなければ追加）
+        for col, default in [
+            ("transcript_status", "'pending'"),
+            ("summary_status",    "'pending'"),
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE recordings ADD COLUMN {col} TEXT NOT NULL DEFAULT {default}")
+                print(f"[database] マイグレーション: {col} カラムを追加")
+            except Exception:
+                pass  # すでに存在する場合はスキップ
+        # 既存レコードのフラグを内容に基づいて設定
+        conn.execute("""
+            UPDATE recordings
+            SET transcript_status = 'done'
+            WHERE transcript != '' AND transcript_status = 'pending'
+        """)
+        # 古いスキップメッセージをクリア
+        conn.execute("""
+            UPDATE recordings
+            SET ai_summary = '', summary_status = 'pending'
+            WHERE ai_summary LIKE '%Ollama導入後%'
+               OR ai_summary LIKE '%現在要約は行いません%'
+               OR ai_summary LIKE '%要約にはGroq APIキー%'
+        """)
+        conn.execute("""
+            UPDATE recordings
+            SET summary_status = 'done'
+            WHERE ai_summary != '' AND summary_status = 'pending'
         """)
         conn.commit()
     print("[database] 初期化完了")
@@ -56,8 +87,8 @@ def create_recording(
     with get_connection() as conn:
         cursor = conn.execute(
             """
-            INSERT INTO recordings (title, memo, transcript, ai_summary, wav_file, created_at, updated_at)
-            VALUES (?, ?, '', '', ?, ?, ?)
+            INSERT INTO recordings (title, memo, transcript, ai_summary, wav_file, transcript_status, summary_status, created_at, updated_at)
+            VALUES (?, ?, '', '', ?, 'pending', 'pending', ?, ?)
             """,
             (title, memo, wav_file, now, now),
         )
@@ -102,17 +133,21 @@ def update_transcript_and_summary(
 ) -> None:
     """文字起こしと要約を保存する（録音停止後に自動で呼び出す）"""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    t_status = "done" if transcript else "error"
+    s_status = "done" if ai_summary and "Ollama導入後" not in ai_summary and "現在要約は行いません" not in ai_summary else "pending"
     with get_connection() as conn:
         conn.execute(
             """
             UPDATE recordings
-            SET transcript = ?, ai_summary = ?, updated_at = ?
+            SET transcript = ?, ai_summary = ?,
+                transcript_status = ?, summary_status = ?,
+                updated_at = ?
             WHERE id = ?
             """,
-            (transcript, ai_summary, now, record_id),
+            (transcript, ai_summary, t_status, s_status, now, record_id),
         )
         conn.commit()
-    print(f"[database] 文字起こし・要約を保存: id={record_id}")
+    print(f"[database] 文字起こし・要約を保存: id={record_id} (transcript:{t_status}, summary:{s_status})")
 
 
 def update_title_and_memo(
