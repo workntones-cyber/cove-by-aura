@@ -50,9 +50,16 @@ def shutdown():
     """AURAを終了する"""
     import threading
     def _shutdown():
-        import time, os, signal
+        import time, os, signal, subprocess
         time.sleep(0.3)  # レスポンスを返してから終了
         print("[main] シャットダウン要求を受信しました")
+        # AURAが起動したOllamaを停止
+        try:
+            subprocess.run(["taskkill", "/F", "/IM", "ollama.exe"],
+                         capture_output=True)
+            print("[main] Ollamaを停止しました")
+        except Exception as e:
+            print(f"[main] Ollama停止エラー: {e}")
         os.kill(os.getpid(), signal.SIGTERM)
     threading.Thread(target=_shutdown, daemon=True).start()
     return jsonify({"status": "ok"}), 200
@@ -501,6 +508,29 @@ def model_status():
 #  起動
 # ══════════════════════════════════════════════════
 
+
+def _start_ollama():
+    """AURAと一緒にOllamaを起動する（ビジネス用モード時）"""
+    import subprocess
+    import urllib.request
+    # すでに起動しているか確認
+    try:
+        urllib.request.urlopen("http://127.0.0.1:11434", timeout=2)
+        print("[main] Ollamaはすでに起動しています")
+        return
+    except Exception:
+        pass
+    # Ollamaを起動
+    try:
+        subprocess.Popen(
+            ["ollama", "serve"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        print("[main] Ollamaを起動しました")
+    except Exception as e:
+        print(f"[main] Ollama起動エラー: {e}")
+
 def _open_browser():
     """Flaskの起動を待ってからブラウザを開く"""
     import time
@@ -529,12 +559,14 @@ if __name__ == "__main__":
 
     if not is_frozen:
         # 通常の開発時はデバッグモード
+        threading.Thread(target=_start_ollama, daemon=True).start()
         threading.Thread(target=_auto_preload_model, daemon=True).start()
         app.run(host="127.0.0.1", port=5001, debug=True)
     else:
         # 配布用：ブラウザを別スレッドで起動してからFlaskを起動
         print("AURA を起動しています...")
         print("ブラウザが開かない場合は http://127.0.0.1:5001 にアクセスしてください")
+        threading.Thread(target=_start_ollama, daemon=True).start()
         threading.Thread(target=_auto_preload_model, daemon=True).start()
         threading.Thread(target=_open_browser, daemon=True).start()
         app.run(host="127.0.0.1", port=5001, debug=False, use_reloader=False)
