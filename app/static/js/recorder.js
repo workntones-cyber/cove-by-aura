@@ -24,6 +24,7 @@ document.addEventListener('DOMContentLoaded', () => {
   updateSettingsBadge();
   checkModelReady();
   restoreInputs();
+  checkOllama();
 
   document.addEventListener('mousemove', e => {
     if (!isDragging || dragId === null) return;
@@ -158,18 +159,20 @@ async function runTranscribe(recordId) {
   step1.querySelector('span').textContent = '文字起こし完了';
 
   step2.classList.add('active');
-  // ビジネス用モードの場合、要約ステップに補足メッセージを表示
+  // ビジネス用モードの場合、要約をスキップ表示
+  let isBusinessMode = false;
   try {
     const settingsRes2 = await fetch('/api/settings');
     const settings2    = await settingsRes2.json();
-    if (settings2.ai_mode === 'business') {
-      step2.querySelector('span').textContent = 'AI要約中... （初回モデルDL時は数分〜10分かかる場合があります）';
+    isBusinessMode = settings2.ai_mode === 'business';
+    if (isBusinessMode) {
+      step2.querySelector('span').textContent = '要約スキップ（ビジネス用：完全ローカル処理）';
     }
   } catch (e) {}
-  await new Promise(r => setTimeout(r, 500));
+  await new Promise(r => setTimeout(r, 300));
   step2.classList.remove('active'); step2.classList.add('done');
-  step2.querySelector('.step-icon').textContent = '✓';
-  step2.querySelector('span').textContent = 'AI要約完了';
+  step2.querySelector('.step-icon').textContent = isBusinessMode ? '–' : '✓';
+  step2.querySelector('span').textContent = isBusinessMode ? '要約スキップ（Ollama導入後に対応予定）' : 'AI要約完了';
 
   document.getElementById('transcriptBody').textContent = data.transcript;
   document.getElementById('summaryBody').textContent    = data.ai_summary;
@@ -508,7 +511,7 @@ async function checkModelReady() {
       return;
     }
 
-    // ダウンロード中またはidle（まだ開始前）→ ロック
+    // ロード中またはidle（まだ開始前）→ ロック
     lockForModel(data.status);
     _modelReadyTimer = setInterval(async () => {
       try {
@@ -522,7 +525,7 @@ async function checkModelReady() {
           clearInterval(_modelReadyTimer);
           _modelReadyTimer = null;
           showModelBanner(
-            `❌ AIモデルのダウンロードに失敗しました。設定画面で再度ビジネス用モードを保存してください。`,
+            `❌ AIモデルのロードに失敗しました。設定画面で再度ビジネス用モードを保存してください。`,
             'error'
           );
         }
@@ -539,10 +542,10 @@ function lockForModel(status) {
     btn.style.opacity = '0.4';
     btn.style.cursor  = 'not-allowed';
   }
-  const msg = status === 'downloading'
-    ? '⏳ AIモデルをダウンロード中です（約1.5GB）。完了後に録音できます...'
+  const msg = status === 'loading'
+    ? '⏳ AIモデルをロード中です。完了後に録音できます...'
     : '⏳ AIモデルを準備中です。しばらくお待ちください...';
-  showModelBanner(msg, 'downloading');
+  showModelBanner(msg, 'loading');
 }
 
 function hideModelBanner() {
@@ -593,6 +596,21 @@ function restoreInputs() {
   memoEl.addEventListener('input', () => {
     sessionStorage.setItem('aura_memo', memoEl.value);
   });
+}
+
+// ── Ollama起動チェック（ビジネス用モード） ──────────
+async function checkOllama() {
+  try {
+    const settingsRes = await fetch('/api/settings');
+    const settings    = await settingsRes.json();
+    if (settings.ai_mode !== 'business') return;
+
+    const res  = await fetch('/api/ollama/status');
+    const data = await res.json();
+    if (data.status !== 'running') {
+      document.getElementById('ollamaBanner').style.display = 'flex';
+    }
+  } catch (e) {}
 }
 
 // ── アプリ終了 ────────────────────────────────────

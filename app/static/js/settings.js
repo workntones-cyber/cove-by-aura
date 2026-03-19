@@ -115,15 +115,15 @@ function startModelStatusPolling() {
     try {
       const res  = await fetch('/api/model/status');
       const data = await res.json();
-      if (data.status === 'downloading') {
-        showModelStatus('⏳ AIモデルをダウンロード中です（約1.5GB）。このまましばらくお待ちください...');
+      if (data.status === 'loading') {
+        showModelStatus('⏳ AIモデルをロード中です。このまましばらくお待ちください...');
       } else if (data.status === 'ready') {
         showModelStatus('✅ AIモデルの準備が完了しました。録音を開始できます。', 'ready');
         clearInterval(_modelPollingTimer);
         _modelPollingTimer = null;
         setTimeout(hideModelStatus, 5000);
       } else if (data.status === 'error') {
-        showModelStatus(`❌ モデルのダウンロードに失敗しました: ${data.error}`, 'error');
+        showModelStatus(`❌ モデルのロードに失敗しました: ${data.error}`, 'error');
         clearInterval(_modelPollingTimer);
         _modelPollingTimer = null;
       }
@@ -155,7 +155,7 @@ async function checkModelStatusOnLoad() {
   try {
     const res  = await fetch('/api/model/status');
     const data = await res.json();
-    if (data.status === 'downloading') {
+    if (data.status === 'loading') {
       startModelStatusPolling();
     } else if (data.status === 'ready') {
       showModelStatus('✅ AIモデルの準備が完了しています。', 'ready');

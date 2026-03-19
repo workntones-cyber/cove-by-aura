@@ -242,10 +242,10 @@ def preload_model():
 
 def _preload_model_thread():
     global _model_status, _model_error
-    if _model_status in ("downloading", "ready"):
+    if _model_status in ("loading", "ready"):
         return  # すでに進行中またはロード済み
     try:
-        _model_status = "downloading"
+        _model_status = "loading"
         print("[transcriber] バックグラウンドでモデルをプリロード中...")
         _get_whisper_model()
         _model_status = "ready"
@@ -284,8 +284,19 @@ def _get_whisper_model():
         compute   = "int8"
         print("[transcriber] torch未インストール: CPUで実行します")
 
-    print(f"[transcriber] Whisperモデルをロード中: {FASTER_WHISPER_MODEL} ({device})")
-    print("[transcriber] 初回はモデルのダウンロードが発生します（約1.5GB）")
+    # キャッシュの有無を確認してメッセージを出し分け
+    import os
+    cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
+    model_cached = any(
+        FASTER_WHISPER_MODEL.replace(".", "-") in str(p)
+        for p in cache_dir.glob("**/config.json")
+    ) if cache_dir.exists() else False
+
+    if model_cached:
+        print(f"[transcriber] Whisperモデルをロード中: {FASTER_WHISPER_MODEL} ({device})")
+    else:
+        print(f"[transcriber] Whisperモデルをロード中: {FASTER_WHISPER_MODEL} ({device})")
+        print("[transcriber] 初回のみ：モデルのダウンロードが発生します（約1.5GB）")
 
     _whisper_model      = WhisperModel(FASTER_WHISPER_MODEL, device=device, compute_type=compute)
     _whisper_model_name = FASTER_WHISPER_MODEL
@@ -321,20 +332,11 @@ def _transcribe_faster_whisper(wav_filename: str) -> dict:
         if not transcript:
             return {"status": "error", "message": "文字起こし結果が空でした（無音または認識できませんでした）"}
 
-        # ── ② 要約（Groq LLaMA） ──────────────────
-        # ビジネス用でも要約はGroq LLaMAを使用
-        # （ローカルLLMは別途対応が必要なため）
-        env     = _read_env()
-        api_key = env.get("GROQ_API_KEY", "").strip()
-
-        if api_key:
-            from groq import Groq
-            client     = Groq(api_key=api_key)
-            ai_summary = _call_llama(client, transcript)
-            print(f"[transcriber] 要約完了: {len(ai_summary)}文字")
-        else:
-            ai_summary = "（要約にはGroq APIキーの設定が必要です）"
-            print("[transcriber] Groq APIキー未設定のため要約をスキップ")
+        # ── ② 要約 ────────────────────────────────
+        # ビジネス用モードでは完全ローカル処理のため要約はスキップ
+        # （Ollama導入後にローカル要約を実装予定）
+        ai_summary = "（ビジネス用モードでは現在要約は行いません。Ollama導入後に対応予定です）"
+        print("[transcriber] ビジネス用モード：要約スキップ（完全ローカル処理のため）")
 
         return {
             "status":     "done",

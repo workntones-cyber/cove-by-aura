@@ -383,6 +383,17 @@ def settings_save():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+
+@app.route("/api/ollama/status", methods=["GET"])
+def ollama_status():
+    """Ollamaの起動状態を確認する"""
+    import urllib.request
+    try:
+        urllib.request.urlopen("http://127.0.0.1:11434", timeout=2)
+        return jsonify({"status": "running"}), 200
+    except Exception:
+        return jsonify({"status": "not_running"}), 200
+
 @app.route("/api/model/status", methods=["GET"])
 def model_status():
     """
