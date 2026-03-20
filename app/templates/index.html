@@ -85,10 +85,16 @@
     </div>
     <div class="process-step" id="step2">
       <div class="step-icon">②</div>
+      <span>クリーニング中...</span>
+    </div>
+    <div class="process-step" id="step3">
+      <div class="step-icon">③</div>
       <span>AI要約中...</span>
     </div>
     <div class="error-detail" id="transcribeError"></div>
-
+    <div id="retryAfterError" style="display:none; text-align:center; margin-top:12px;">
+      <button class="btn btn-retry" onclick="retryLatestTranscribe()">🔄 再試行</button>
+    </div>
   </div>
 
   <!-- 結果表示 -->

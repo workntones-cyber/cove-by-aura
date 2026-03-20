@@ -312,13 +312,10 @@ if getattr(sys, "frozen", False):
     ENV_PATH = Path(sys.executable).resolve().parent / ".env"
 else:
     ENV_PATH = Path(__file__).resolve().parent / ".env"
-print(f"[main] ENV_PATH: {ENV_PATH}")
-print(f"[main] frozen: {getattr(sys, 'frozen', False)}")
 # 起動時に .env が存在しない場合は空ファイルを作成
 if not ENV_PATH.exists():
     ENV_PATH.write_text("AI_MODE=personal\nRECORDING_SOURCE=mic\n", encoding="utf-8")
     print(f"[main] .env を新規作成しました")
-print(f"[main] ENV_PATH exists: {ENV_PATH.exists()}")
 
 def _read_env() -> dict:
     """`.env` ファイルを読み込んで辞書で返す"""

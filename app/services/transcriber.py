@@ -86,8 +86,6 @@ def _transcribe_groq(wav_filename: str, env: dict) -> dict:
         # ── ② 不要文字列除去（Groq LLaMA） ─────────
         print(f"[transcriber] 不要文字列除去開始")
         transcript = _clean_transcript_groq(client, raw_transcript)
-        # record_idはtranscribe_and_summarize経由では個人用に未渡しのため
-        # main.pyのtranscribeルートで保存する
 
         # ── ③ 要約（Groq LLaMA） ─────────────────
         print(f"[transcriber] 要約開始")
@@ -467,79 +465,6 @@ def _summarize_ollama(transcript: str, extra_prompt: str = "") -> str:
         return data.get("response", "").strip()
 
 
-def _filter_transcript(text: str) -> str:
-    """
-    文字起こし結果から不要な文字列を除去する。
-    - フィラー（あー、えーと、うーん等）
-    - 挨拶・定型文（よろしくお願いします等）
-    - 相槌のみの文
-    - 短すぎる断片
-    """
-    import re
-
-    # フィラー・感嘆詞をインラインで除去
-    filler_pattern = re.compile(
-        r'(あー+|えー+|うー+|んー+|あのー+|えーと+|そのー+|まあ+|'
-        r'あ、|え、|う、|ん、|はい、はい、|ええ、ええ、|'
-        r'なんか、|ちょっと、|そうですね、)',
-    )
-    text = filler_pattern.sub('', text)
-
-    # 連続するスペースを整理
-    text = re.sub(r'  +', ' ', text).strip()
-
-    # 文単位で分割して処理（句点・感嘆符・疑問符で区切る）
-    sentences = re.split(r'(?<=[。！？])', text)
-    filtered = []
-
-    # 除外する定型フレーズ（部分一致）
-    skip_phrases = [
-        'よろしくお願いします', 'よろしくお願いいたします', 'よろしくお願い致します',
-        'お疲れ様です', 'お疲れ様でした', 'お疲れさまです', 'お疲れさまでした',
-        'ありがとうございます', 'ありがとうございました', 'ありがとうございます',
-        'おはようございます', 'こんにちは', 'こんばんは',
-        'お世話になります', 'お世話になっております', 'お世話になってます',
-        'はじめまして', '失礼します', '失礼いたします', '失礼致します',
-        'では以上です', '以上です', '以上になります',
-        'よろしいでしょうか', 'よろしいですか',
-        'それでは始めます', 'それでははじめます', 'では始めましょう',
-        'では終わります', 'では以上で終わります',
-        'お願いします', 'お願いいたします',
-        'とんでもないです', 'とんでもございません',
-        '問題ございません', '問題ありません', '大丈夫です',
-        'すいません', 'すみません', '申し訳ございません', '申し訳ありません',
-        'では、すいません', 'では、すみません',
-        'かしこまりました', '承知しました', '承知いたしました',
-        'そうですね', 'なるほどですね', 'おっしゃる通りです',
-    ]
-
-    # 相槌のみの文パターン
-    aizuchi_pattern = re.compile(
-        r'^(はい|ええ|うん|そうですね|なるほど|そうですか|そうですそうです|'
-        r'確かに|おっしゃる通り|ごもっとも)[。、！ ]*$'
-    )
-
-    for sentence in sentences:
-        s = sentence.strip()
-        if not s:
-            continue
-        # 短すぎる（5文字以下）はスキップ
-        if len(s) <= 5:
-            continue
-        # 相槌のみの文はスキップ
-        if aizuchi_pattern.match(s):
-            continue
-        # 定型フレーズのみの文はスキップ（句点を除いて比較）
-        s_clean = re.sub(r'[。、！？ ]', '', s)
-        if any(s_clean == re.sub(r'[。、！？ ]', '', phrase) for phrase in skip_phrases):
-            continue
-        # 定型フレーズで始まる短い文もスキップ（20文字以下）
-        if len(s) <= 20 and any(phrase in s for phrase in skip_phrases):
-            continue
-        filtered.append(s)
-
-    return ' '.join(filtered).strip()
-
 def _transcribe_faster_whisper(wav_filename: str, extra_prompt: str = "", record_id: int = None) -> dict:
     """
     faster-whisper を使ったローカル文字起こし & LLaMAで要約。
@@ -570,9 +495,8 @@ def _transcribe_faster_whisper(wav_filename: str, extra_prompt: str = "", record
             vad_filter=True,       # 無音区間をスキップして高速化
             vad_parameters={"min_silence_duration_ms": 500},
         )
-        raw_transcript = " ".join([seg.text.strip() for seg in segments]).strip()
-        transcript = _filter_transcript(raw_transcript)
-        print(f"[transcriber] faster-whisper 文字起こし完了: {len(transcript)}文字 ({info.duration:.1f}秒) ※フィルタ前: {len(raw_transcript)}文字")
+        transcript = " ".join([seg.text.strip() for seg in segments]).strip()
+        print(f"[transcriber] faster-whisper 文字起こし完了: {len(transcript)}文字 ({info.duration:.1f}秒)")
 
         if not transcript:
             return {"status": "error", "message": "文字起こし結果が空でした（無音または認識できませんでした）"}

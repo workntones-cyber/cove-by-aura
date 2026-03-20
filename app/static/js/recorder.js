@@ -119,21 +119,20 @@ async function stopRecording() {
   await runTranscribe(currentRecordId);
 }
 
-// ── 文字起こし & 要約 ─────────────────────────────
+// ── 文字起こし & クリーニング & 要約 ──────────────
 async function runTranscribe(recordId) {
   const processSection = document.getElementById('processSection');
   const step1 = document.getElementById('step1');
   const step2 = document.getElementById('step2');
+  const step3 = document.getElementById('step3');
 
   // エラー表示をリセット
   const errorDetail = document.getElementById('transcribeError');
   if (errorDetail) { errorDetail.classList.remove('visible'); errorDetail.textContent = ''; }
 
   processSection.classList.add('visible');
-  step1.classList.remove('error'); step2.classList.remove('error');
+  [step1, step2, step3].forEach(s => { if(s) s.classList.remove('error'); });
   step1.classList.add('active');
-
-
 
   let data;
   try {
@@ -144,35 +143,39 @@ async function runTranscribe(recordId) {
     });
     data = await res.json();
   } catch (e) {
-    showTranscribeError(step1, step2, 'ネットワークエラーが発生しました。サーバーが起動しているか確認してください。');
+    showTranscribeError('ネットワークエラーが発生しました。サーバーが起動しているか確認してください。');
     return;
   }
 
   if (data.status === 'error') {
-    showTranscribeError(step1, step2, data.message || 'エラーが発生しました。');
+    showTranscribeError(data.message || 'エラーが発生しました。');
     await loadHistory();
     return;
   }
 
+  // step1 完了
   step1.classList.remove('active'); step1.classList.add('done');
   step1.querySelector('.step-icon').textContent = '✓';
   step1.querySelector('span').textContent = '文字起こし完了';
 
-  step2.classList.add('active');
-  // ビジネス用モードの場合、要約をスキップ表示
-  let isBusinessMode = false;
-  try {
-    const settingsRes2 = await fetch('/api/settings');
-    const settings2    = await settingsRes2.json();
-    isBusinessMode = settings2.ai_mode === 'business';
-    if (isBusinessMode) {
-      step2.querySelector('span').textContent = '要約スキップ（ビジネス用：完全ローカル処理）';
-    }
-  } catch (e) {}
-  await new Promise(r => setTimeout(r, 300));
-  step2.classList.remove('active'); step2.classList.add('done');
-  step2.querySelector('.step-icon').textContent = '✓';
-  step2.querySelector('span').textContent = isBusinessMode ? '要約スキップ（Ollama導入後に対応予定）' : 'AI要約完了';
+  // step2 クリーニング
+  if (step2) {
+    step2.classList.add('active');
+    step2.querySelector('span').textContent = 'クリーニング中...';
+    await new Promise(r => setTimeout(r, 300));
+    step2.classList.remove('active'); step2.classList.add('done');
+    step2.querySelector('.step-icon').textContent = '✓';
+    step2.querySelector('span').textContent = 'クリーニング完了';
+  }
+
+  // step3 要約
+  if (step3) {
+    step3.classList.add('active');
+    await new Promise(r => setTimeout(r, 300));
+    step3.classList.remove('active'); step3.classList.add('done');
+    step3.querySelector('.step-icon').textContent = '✓';
+    step3.querySelector('span').textContent = 'AI要約完了';
+  }
 
   document.getElementById('transcriptBody').textContent = data.transcript;
   document.getElementById('summaryBody').textContent    = data.ai_summary;
@@ -187,20 +190,65 @@ async function runTranscribe(recordId) {
   showToast('🎉 完了しました！');
 }
 
-function showTranscribeError(step1, step2, message) {
-  step1.classList.remove('active'); step1.classList.add('error');
-  step1.querySelector('.step-icon').textContent = '✕';
-  step1.querySelector('span').textContent = '処理に失敗しました';
-  step2.classList.add('error');
-  step2.querySelector('.step-icon').textContent = '–';
-  step2.querySelector('span').textContent = 'スキップ';
+function showTranscribeError(message) {
+  const step1 = document.getElementById('step1');
+  const step2 = document.getElementById('step2');
+  const step3 = document.getElementById('step3');
+  if (step1) { step1.classList.remove('active'); step1.classList.add('error');
+    step1.querySelector('.step-icon').textContent = '✕';
+    step1.querySelector('span').textContent = '処理に失敗しました'; }
+  if (step2) { step2.classList.add('error');
+    step2.querySelector('.step-icon').textContent = '–'; }
+  if (step3) { step3.classList.add('error');
+    step3.querySelector('.step-icon').textContent = '–'; }
+  if (step2) step2.querySelector('span').textContent = 'スキップ';
 
   const errorDetail = document.getElementById('transcribeError');
   if (errorDetail) {
     errorDetail.textContent = '❌ ' + message;
     errorDetail.classList.add('visible');
   }
+  // 再試行ボタンを表示
+  const retryBtn = document.getElementById('retryAfterError');
+  if (retryBtn) retryBtn.style.display = 'block';
   showToast('❌ ' + message);
+}
+
+// 最新録音の再試行
+async function retryLatestTranscribe() {
+  // 最新のrecord_idを取得
+  try {
+    const res  = await fetch('/api/recordings');
+    const data = await res.json();
+    if (!data.length) return;
+    const latest = data[0];  // 最新が先頭
+
+    // 再試行ボタンを隠す
+    const retryBtn = document.getElementById('retryAfterError');
+    if (retryBtn) retryBtn.style.display = 'none';
+
+    // エラー表示をリセット
+    const errorDetail = document.getElementById('transcribeError');
+    if (errorDetail) { errorDetail.classList.remove('visible'); errorDetail.textContent = ''; }
+
+    // 処理ステップをリセット
+    const step1 = document.getElementById('step1');
+    const step2 = document.getElementById('step2');
+    const step3 = document.getElementById('step3');
+    step1.className = 'process-step active';
+    step1.querySelector('.step-icon').textContent = '①';
+    step1.querySelector('span').textContent = '文字起こし中...';
+    step2.className = 'process-step';
+    step2.querySelector('.step-icon').textContent = '②';
+    step2.querySelector('span').textContent = 'クリーニング中...';
+    if (step3) { step3.className = 'process-step';
+      step3.querySelector('.step-icon').textContent = '③';
+      step3.querySelector('span').textContent = 'AI要約中...'; }
+
+    await runTranscription(latest.id);
+  } catch (e) {
+    showToast('❌ 再試行に失敗しました');
+  }
 }
 
 // ── BlackHole チェック（Mac・システム音声モード時） ──
