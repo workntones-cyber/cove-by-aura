@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>COVE - 相談室</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/x-icon" href="/static/aura.ico">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+<nav>
+  <span class="nav-logo"><img src="/static/aura_icon_256.png" style="width:24px;height:24px;vertical-align:middle;margin-right:8px;border-radius:4px;">AURA</span>
+  <div class="nav-links">
+    <a href="/" class="nav-link {% if active_page == 'index' %}active{% endif %}">🎙️ 録音</a>
+    <a href="/vault" class="nav-link {% if active_page == 'vault' %}active{% endif %}">🗄️ 保管庫</a>
+    <a href="/council" class="nav-link {% if active_page == 'council' %}active{% endif %}">💬 相談室</a>
+    <a href="/settings" class="nav-link {% if active_page == 'settings' %}active{% endif %}">⚙️ 設定</a>
+    <button class="nav-shutdown-btn" onclick="shutdownApp()" title="AURAを終了する">⏻ 終了</button>
+  </div>
+</nav>
+
+<main style="max-width:720px; margin:60px auto; padding:0 24px; text-align:center;">
+  <div style="font-size:48px; margin-bottom:16px;">💬</div>
+  <h1 style="font-size:28px; margin-bottom:8px;">相談室</h1>
+  <p style="color:var(--muted); font-size:14px;">AIペルソナチームに相談して意思決定を支援する場所です。<br>現在実装中です。</p>
+</main>
+
+<script src="/static/js/recorder.js"></script>
+</body>
+</html>

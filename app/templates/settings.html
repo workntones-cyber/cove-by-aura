@@ -15,6 +15,8 @@
   <span class="nav-logo"><img src="/static/aura_icon_256.png" style="width:24px;height:24px;vertical-align:middle;margin-right:8px;border-radius:4px;">AURA</span>
   <div class="nav-links">
     <a href="/" class="nav-link {% if active_page == 'index' %}active{% endif %}">🎙️ 録音</a>
+    <a href="/vault" class="nav-link {% if active_page == 'vault' %}active{% endif %}">🗄️ 保管庫</a>
+    <a href="/council" class="nav-link {% if active_page == 'council' %}active{% endif %}">💬 相談室</a>
     <a href="/settings" class="nav-link {% if active_page == 'settings' %}active{% endif %}">⚙️ 設定</a>
     <button class="nav-shutdown-btn" onclick="shutdownApp()" title="AURAを終了する">⏻ 終了</button>
   </div>

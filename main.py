@@ -143,6 +143,18 @@ def index():
     return render_template("index.html", active_page="index")
 
 
+
+@app.route("/vault")
+def vault_page():
+    """保管庫ページ（Phase 2で実装予定）"""
+    return render_template("vault.html", active_page="vault")
+
+
+@app.route("/council")
+def council_page():
+    """相談室ページ（Phase 3で実装予定）"""
+    return render_template("council.html", active_page="council")
+
 @app.route("/settings")
 def settings():
     """設定画面"""
