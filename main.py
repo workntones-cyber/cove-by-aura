@@ -295,6 +295,74 @@ def vault_files_delete(file_id):
     return jsonify(result), 200
 
 
+
+@app.route("/api/vault/web", methods=["POST"])
+def vault_web_fetch():
+    """URLからWebページを取得してOllamaで要約・保管庫に保存する"""
+    data        = request.get_json(silent=True) or {}
+    url         = data.get("url", "").strip()
+    category_id = int(data.get("category_id", 1) or 1)
+
+    if not url:
+        return jsonify({"status": "error", "message": "URLは必須です"}), 400
+
+    # バックグラウンドで取得・要約
+    def _fetch_and_summarize():
+        try:
+            import urllib.request as _req
+            import html
+            import re
+
+            # ページ取得
+            headers = {"User-Agent": "Mozilla/5.0 (compatible; COVE-bot/1.0)"}
+            req = _req.Request(url, headers=headers)
+            with _req.urlopen(req, timeout=15) as res:
+                raw = res.read()
+                charset = res.headers.get_content_charset() or "utf-8"
+                html_text = raw.decode(charset, errors="ignore")
+
+            # タイトル抽出
+            title_match = re.search(r"<title[^>]*>([^<]+)</title>", html_text, re.IGNORECASE)
+            title = html.unescape(title_match.group(1).strip()) if title_match else url
+
+            # テキスト抽出（タグ除去）
+            text = re.sub(r"<script[^>]*>.*?</script>", "", html_text, flags=re.DOTALL|re.IGNORECASE)
+            text = re.sub(r"<style[^>]*>.*?</style>",  "", text, flags=re.DOTALL|re.IGNORECASE)
+            text = re.sub(r"<[^>]+>", " ", text)
+            text = html.unescape(text)
+            text = re.sub(r"\s+", " ", text).strip()
+
+            # 長すぎる場合は先頭5000文字に制限
+            if len(text) > 5000:
+                text = text[:5000] + "..."
+
+            if not text:
+                create_vault_memo(title, f"（テキストを抽出できませんでした）
+URL: {url}", category_id)
+                return
+
+            # Ollamaで要約
+            from app.services.transcriber import _summarize_ollama
+            summary = _summarize_ollama(text)
+
+            # メモとして保存（タイトル＋URL＋要約）
+            body = f"URL: {url}\n\n{summary}"
+            create_vault_memo(title, body, category_id)
+            print(f"[vault] Web取得完了: {title}")
+
+        except Exception as e:
+            print(f"[vault] Web取得エラー: {e}")
+            # エラー内容もメモとして保存
+            create_vault_memo(
+                f"取得失敗: {url}",
+                f"URL: {url}\n\nエラー: {str(e)}\n\n考えられる原因：\n・ログインが必要なページ\n・JavaScriptで動的生成されるページ\n・アクセスが制限されているページ",
+                category_id
+            )
+
+    import threading
+    threading.Thread(target=_fetch_and_summarize, daemon=True).start()
+    return jsonify({"status": "ok", "message": "取得・要約中です。しばらくお待ちください。"}), 200
+
 @app.route("/api/vault/files/<int:file_id>/open-folder", methods=["POST"])
 def vault_open_folder(file_id):
     """保存フォルダをエクスプローラーで開く"""

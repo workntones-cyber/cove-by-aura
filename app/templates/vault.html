@@ -152,7 +152,7 @@
 
     <!-- ファイルアップロード -->
     <div class="vault-panel">
-      <div class="vault-panel-title">📎 ファイルをアップロード</div>
+      <div class="vault-panel-title">📎 ファイルを追加</div>
       <div class="upload-area" id="uploadArea"
         onclick="document.getElementById('fileInput').click()"
         ondragover="handleDragOver(event)"
@@ -169,6 +169,25 @@
       <div class="upload-progress" id="uploadProgress">⏳ アップロード・要約処理中...</div>
       <input type="file" id="fileInput" style="display:none;"
         accept=".pdf,.docx,.xlsx,.pptx,.txt,.md" onchange="handleFileSelect(event)" />
+    </div>
+
+
+    <!-- Webデータ追加 -->
+    <div class="vault-panel">
+      <div class="vault-panel-title">🌐 Webデータを追加</div>
+      <input id="webUrl" class="vault-input" type="url" placeholder="https://example.com/article" />
+      <select id="webCategoryId" class="vault-input vault-select"></select>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.6;">
+        ⚠️ <strong>取得できないケース：</strong><br>
+        ・ログインが必要なページ（SNS・会員サイト等）<br>
+        ・JavaScriptで動的生成されるページ（X・LinkedIn等）<br>
+        ・robots.txtでクロールを禁止しているサイト<br>
+        ✅ <strong>対応：</strong>企業サイト・Qiita・Zenn・ニュース・Wikipedia等
+      </div>
+      <div class="vault-form-actions">
+        <button class="save-btn" onclick="fetchWebData()" style="padding:7px 18px;font-size:13px;">🌐 取得・保存</button>
+      </div>
+      <div id="webProgress" style="display:none;text-align:center;padding:10px;color:var(--muted);font-size:12px;">⏳ Webページを取得・要約中...</div>
     </div>
 
   </div>
@@ -209,7 +228,7 @@ async function loadCategories() {
   _categories = await res.json();
   // 入力欄のselect
   const opts = _categories.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
-  ['memoCategoryId','fileCategoryId'].forEach(id => {
+  ['memoCategoryId','fileCategoryId','webCategoryId'].forEach(id => {
     const el = document.getElementById(id); if (el) el.innerHTML = opts;
   });
   // フィルタのselect
@@ -371,6 +390,35 @@ async function deleteFile(id) {
 
 async function openFolder(id) { await fetch(`/api/vault/files/${id}/open-folder`, {method:'POST'}); }
 
+
+// ── Webデータ取得 ─────────────────────────────────
+async function fetchWebData() {
+  const url   = document.getElementById('webUrl').value.trim();
+  const catId = parseInt(document.getElementById('webCategoryId').value);
+  if (!url) { showToast('❌ URLを入力してください'); return; }
+  if (!url.startsWith('http')) { showToast('❌ http または https で始まるURLを入力してください'); return; }
+
+  document.getElementById('webProgress').style.display = 'block';
+  try {
+    const res  = await fetch('/api/vault/web', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, category_id: catId }),
+    });
+    const data = await res.json();
+    if (data.status === 'ok') {
+      showToast('✅ ' + data.message);
+      document.getElementById('webUrl').value = '';
+      await loadAll();
+      setTimeout(loadAll, 8000);
+    } else {
+      showToast('❌ ' + (data.message || '取得に失敗しました'));
+    }
+  } catch(e) {
+    showToast('❌ 通信エラーが発生しました');
+  }
+  document.getElementById('webProgress').style.display = 'none';
+}
 // ── ユーティリティ ────────────────────────────────
 function toggleItem(id) { document.getElementById(id)?.classList.toggle('open'); }
 function escHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
