@@ -160,6 +160,11 @@ def index():
 
 VAULT_DIR = BASE_DIR / "vault"
 VAULT_DIR.mkdir(exist_ok=True)
+_file_summarize_status = {"status": "idle", "message": ""}
+
+@app.route("/api/vault/files/status", methods=["GET"])
+def vault_file_status():
+    return jsonify(_file_summarize_status), 200
 
 ALLOWED_EXTENSIONS = {".pdf", ".docx", ".xlsx", ".pptx", ".txt", ".md"}
 
@@ -228,18 +233,54 @@ def vault_files_upload():
 
     # バックグラウンドでOllama要約
     def _summarize():
+        global _file_summarize_status
         try:
+            _file_summarize_status = {"status": "extracting", "message": f"テキストを抽出中: {file.filename}"}
             text = _extract_text(save_path, ext)
             if not text:
                 update_vault_file_summary(file_id, "（テキストを抽出できませんでした）")
+                _file_summarize_status = {"status": "done", "message": "完了"}
                 return
-            from app.services.transcriber import _summarize_ollama
-            summary = _summarize_ollama(text)
+            # 短すぎるテキストはそのまま保存（AIが余計な言い換えをしないよう）
+            if len(text) < 200:
+                update_vault_file_summary(file_id, text)
+                _file_summarize_status = {"status": "done", "message": f"完了: {file.filename}"}
+                return
+
+            _file_summarize_status = {"status": "summarizing", "message": f"Ollamaで整形中: {file.filename}"}
+            import urllib.request as _ureq2, json as _json2
+            from app.services.transcriber import _get_ollama_model
+            _file_prompt = (
+                "以下はファイルから抽出したテキストです。\n"
+                "元の内容を一切変えず・追加せず、そのまま読みやすく整理してください。\n"
+                "・重要な数値・固有名詞・日付は正確に残す\n"
+                "・箇条書きや見出しを使って構造化する\n"
+                "・不要な繰り返しや装飾文字のみ除去する\n"
+                "・内容の言い換え・要約・追記は絶対にしないこと\n"
+                "整理後のテキストのみ出力してください。\n\n"
+                f"{text}"
+            )
+            _payload2 = _json2.dumps({
+                "model": _get_ollama_model(),
+                "prompt": _file_prompt,
+                "stream": False,
+            }).encode("utf-8")
+            _req2 = _ureq2.Request(
+                "http://127.0.0.1:11434/api/generate",
+                data=_payload2,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with _ureq2.urlopen(_req2, timeout=None) as _res2:
+                _result2 = _json2.loads(_res2.read().decode("utf-8"))
+                summary  = _result2.get("response", "").strip() or text
             update_vault_file_summary(file_id, summary)
             print(f"[vault] ファイル要約完了: {file.filename}")
+            _file_summarize_status = {"status": "done", "message": f"完了: {file.filename}"}
         except Exception as e:
             print(f"[vault] ファイル要約エラー: {e}")
-            update_vault_file_summary(file_id, f"（要約エラー: {str(e)}）")
+            update_vault_file_summary(file_id, f"（整形エラー: {str(e)}）")
+            _file_summarize_status = {"status": "error", "message": str(e)}
 
     import threading
     threading.Thread(target=_summarize, daemon=True).start()
@@ -284,6 +325,28 @@ def _extract_text(path: Path, ext: str) -> str:
     return ""
 
 
+
+@app.route("/api/vault/files/<int:file_id>/category", methods=["PUT"])
+def vault_file_update_category(file_id):
+    """ファイルのカテゴリ・整形内容を更新する"""
+    from app.database import get_connection
+    data        = request.get_json(silent=True) or {}
+    category_id = int(data.get("category_id", 1) or 1)
+    summary     = data.get("summary", None)
+    with get_connection() as conn:
+        if summary is not None:
+            conn.execute(
+                "UPDATE vault_files SET category_id = ?, summary = ? WHERE id = ?",
+                (category_id, summary, file_id)
+            )
+        else:
+            conn.execute(
+                "UPDATE vault_files SET category_id = ? WHERE id = ?",
+                (category_id, file_id)
+            )
+        conn.commit()
+    return jsonify({"status": "ok"}), 200
+
 @app.route("/api/vault/files/<int:file_id>", methods=["DELETE"])
 def vault_files_delete(file_id):
     result = delete_vault_file(file_id)
@@ -296,71 +359,198 @@ def vault_files_delete(file_id):
 
 
 
-@app.route("/api/vault/web", methods=["POST"])
-def vault_web_fetch():
-    """URLからWebページを取得してOllamaで要約・保管庫に保存する"""
-    data        = request.get_json(silent=True) or {}
-    url         = data.get("url", "").strip()
-    category_id = int(data.get("category_id", 1) or 1)
+# Web取得処理の状態管理
+_web_fetch_status = {"status": "idle", "message": "", "progress": 0, "total": 0}
 
+
+@app.route("/api/vault/web/status", methods=["GET"])
+def vault_web_status():
+    """Web取得処理の状態を返す"""
+    return jsonify(_web_fetch_status), 200
+
+
+@app.route("/api/vault/web/analyze", methods=["POST"])
+def vault_web_analyze():
+    """URLを解析して同一ドメインのリンク一覧を返す"""
+    import urllib.request as _req
+    import urllib.parse as _parse
+    import html as _html
+    import re
+
+    data = request.get_json(silent=True) or {}
+    url  = data.get("url", "").strip()
     if not url:
         return jsonify({"status": "error", "message": "URLは必須です"}), 400
 
-    # バックグラウンドで取得・要約
-    def _fetch_and_summarize():
-        try:
-            import urllib.request as _req
-            import html
-            import re
+    try:
+        parsed_base = _parse.urlparse(url)
+        base_domain = parsed_base.scheme + "://" + parsed_base.netloc
 
-            # ページ取得
-            headers = {"User-Agent": "Mozilla/5.0 (compatible; COVE-bot/1.0)"}
-            req = _req.Request(url, headers=headers)
-            with _req.urlopen(req, timeout=15) as res:
-                raw = res.read()
-                charset = res.headers.get_content_charset() or "utf-8"
-                html_text = raw.decode(charset, errors="ignore")
+        headers  = {"User-Agent": "Mozilla/5.0 (compatible; COVE-bot/1.0)"}
+        req      = _req.Request(url, headers=headers)
+        with _req.urlopen(req, timeout=15) as res:
+            raw      = res.read()
+            charset  = res.headers.get_content_charset() or "utf-8"
+            html_text = raw.decode(charset, errors="ignore")
 
-            # タイトル抽出
-            title_match = re.search(r"<title[^>]*>([^<]+)</title>", html_text, re.IGNORECASE)
-            title = html.unescape(title_match.group(1).strip()) if title_match else url
+        # ページタイトル
+        title_match = re.search(r"<title[^>]*>([^<]+)</title>", html_text, re.IGNORECASE)
+        page_title  = _html.unescape(title_match.group(1).strip()) if title_match else url
 
-            # テキスト抽出（タグ除去）
-            text = re.sub(r"<script[^>]*>.*?</script>", "", html_text, flags=re.DOTALL|re.IGNORECASE)
-            text = re.sub(r"<style[^>]*>.*?</style>",  "", text, flags=re.DOTALL|re.IGNORECASE)
-            text = re.sub(r"<[^>]+>", " ", text)
-            text = html.unescape(text)
-            text = re.sub(r"\s+", " ", text).strip()
+        # 同一ドメインのリンクを抽出
+        links = []
+        seen  = set()
+        for href, text in re.findall(r'href=["\']([^"\']+)["\'][^>]*>([^<]*)', html_text):
+            href = href.strip()
+            text = _html.unescape(text.strip())
 
-            # 長すぎる場合は先頭5000文字に制限
-            if len(text) > 5000:
-                text = text[:5000] + "..."
+            # 相対URLを絶対URLに変換
+            if href.startswith('/'):
+                href = base_domain + href
+            elif not href.startswith('http'):
+                continue
 
-            if not text:
-                create_vault_memo(title, "（テキストを抽出できませんでした）\nURL: " + url, category_id)
-                return
+            # 同一ドメインのみ
+            parsed = _parse.urlparse(href)
+            if parsed.netloc != parsed_base.netloc:
+                continue
 
-            # Ollamaで要約
-            from app.services.transcriber import _summarize_ollama
-            summary = _summarize_ollama(text)
+            # フラグメント・クエリを除いたURLで重複チェック
+            clean = parsed.scheme + "://" + parsed.netloc + parsed.path
+            if clean in seen or clean == url:
+                continue
+            seen.add(clean)
 
-            # メモとして保存（タイトル＋URL＋要約）
-            body = f"URL: {url}\n\n{summary}"
-            create_vault_memo(title, body, category_id)
-            print(f"[vault] Web取得完了: {title}")
+            links.append({
+                "url":   href,
+                "title": text or href,
+            })
 
-        except Exception as e:
-            print(f"[vault] Web取得エラー: {e}")
-            # エラー内容もメモとして保存
-            create_vault_memo(
-                f"取得失敗: {url}",
-                f"URL: {url}\n\nエラー: {str(e)}\n\n考えられる原因：\n・ログインが必要なページ\n・JavaScriptで動的生成されるページ\n・アクセスが制限されているページ",
-                category_id
-            )
+        return jsonify({
+            "status":     "ok",
+            "page_title": page_title,
+            "base_url":   url,
+            "links":      links[:100],  # 最大100件表示
+        }), 200
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"解析エラー: {str(e)}"}), 500
+
+
+@app.route("/api/vault/web", methods=["POST"])
+def vault_web_fetch():
+    """選択したURLリストを順番に取得・整形・保管庫に保存する"""
+    global _web_fetch_status
+
+    data        = request.get_json(silent=True) or {}
+    urls        = data.get("urls", [])
+    category_id = int(data.get("category_id", 1) or 1)
+
+    if not urls:
+        return jsonify({"status": "error", "message": "URLが選択されていません"}), 400
+
+    def _fetch_all():
+        global _web_fetch_status
+        import urllib.request as _req
+        import urllib.parse as _parse
+        import html as _html
+        import re
+
+        total = len(urls)
+        _web_fetch_status = {"status": "running", "message": f"0 / {total} ページ完了", "progress": 0, "total": total}
+
+        for i, item in enumerate(urls):
+            url   = item.get("url", "")
+            title = item.get("title", url)
+            try:
+                _web_fetch_status = {
+                    "status":   "running",
+                    "message":  f"{i + 1} / {total} ページ取得中: {title[:30]}",
+                    "progress": i,
+                    "total":    total,
+                }
+
+                # ページ取得
+                headers = {"User-Agent": "Mozilla/5.0 (compatible; COVE-bot/1.0)"}
+                req     = _req.Request(url, headers=headers)
+                with _req.urlopen(req, timeout=15) as res:
+                    raw     = res.read()
+                    charset = res.headers.get_content_charset() or "utf-8"
+                    html_text = raw.decode(charset, errors="ignore")
+
+                # タイトル抽出
+                title_match = re.search(r"<title[^>]*>([^<]+)</title>", html_text, re.IGNORECASE)
+                page_title  = _html.unescape(title_match.group(1).strip()) if title_match else title
+
+                # テキスト抽出
+                text = re.sub(r"<script[^>]*>.*?</script>", "", html_text, flags=re.DOTALL|re.IGNORECASE)
+                text = re.sub(r"<style[^>]*>.*?</style>",  "", text,      flags=re.DOTALL|re.IGNORECASE)
+                text = re.sub(r"<[^>]+>", " ", text)
+                text = _html.unescape(text)
+                text = re.sub(r"\s+", " ", text).strip()
+
+                if len(text) > 8000:
+                    text = text[:8000] + "..."
+
+                if not text:
+                    create_vault_memo(page_title, "（テキストを抽出できませんでした）\nURL: " + url, category_id)
+                    continue
+
+                # Ollamaで整形
+                _web_fetch_status["message"] = f"{i + 1} / {total} 整形中: {page_title[:30]}"
+                from app.services.transcriber import _summarize_ollama
+                import urllib.request as _ureq
+                import json as _json
+
+                prompt = (
+                    "以下はWebページから取得したテキストです。\n"
+                    "ナビゲーション・フッター・広告・メニュー等の不要な部分を除き、"
+                    "本文の情報を欠如なく整理してください。\n"
+                    "箇条書きや見出しを使って読みやすく整形してください。\n"
+                    "整形後のテキストのみ出力してください。\n\n"
+                    f"{text}"
+                )
+
+                payload = _json.dumps({
+                    "model":  _summarize_ollama.__globals__.get("_get_ollama_model", lambda: "llama3.1:8b")(),
+                    "prompt": prompt,
+                    "stream": False,
+                }).encode("utf-8")
+
+                req2 = _ureq.Request(
+                    "http://127.0.0.1:11434/api/generate",
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with _ureq.urlopen(req2, timeout=None) as res2:
+                    result   = _json.loads(res2.read().decode("utf-8"))
+                    arranged = result.get("response", "").strip()
+
+                body = "URL: " + url + "\n\n" + (arranged or text)
+                create_vault_memo(page_title, body, category_id)
+                print(f"[vault] Web取得完了 ({i+1}/{total}): {page_title}")
+
+            except Exception as e:
+                print(f"[vault] Web取得エラー ({url}): {e}")
+                create_vault_memo(
+                    "取得失敗: " + (title or url),
+                    "URL: " + url + "\n\nエラー: " + str(e),
+                    category_id
+                )
+
+        _web_fetch_status = {
+            "status":   "done",
+            "message":  f"{total} ページの取得・保存が完了しました",
+            "progress": total,
+            "total":    total,
+        }
 
     import threading
-    threading.Thread(target=_fetch_and_summarize, daemon=True).start()
-    return jsonify({"status": "ok", "message": "取得・要約中です。しばらくお待ちください。"}), 200
+    threading.Thread(target=_fetch_all, daemon=True).start()
+    _web_fetch_status = {"status": "running", "message": "処理を開始しました", "progress": 0, "total": len(urls)}
+    return jsonify({"status": "ok", "message": f"{len(urls)}ページの取得を開始しました"}), 200
+
 
 @app.route("/api/vault/files/<int:file_id>/open-folder", methods=["POST"])
 def vault_open_folder(file_id):
