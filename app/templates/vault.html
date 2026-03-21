@@ -8,9 +8,120 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="icon" type="image/x-icon" href="/static/aura.ico">
   <link rel="stylesheet" href="/static/css/style.css">
+  <style>
+    .vault-layout {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 24px 16px 80px;
+      align-items: start;
+    }
+
+    /* 左パネル */
+    .vault-left { display: flex; flex-direction: column; gap: 20px; }
+    .vault-panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px;
+    }
+    .vault-panel-title {
+      font-size: 14px; font-weight: 700; margin-bottom: 14px;
+      display: flex; align-items: center; gap: 8px;
+    }
+
+    /* メモフォーム */
+    .vault-input {
+      width: 100%; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 8px; color: var(--text); font-size: 13px;
+      padding: 8px 12px; font-family: inherit; box-sizing: border-box;
+      outline: none; transition: border-color 0.2s; margin-bottom: 8px;
+    }
+    .vault-input:focus { border-color: var(--accent); }
+    .vault-textarea { resize: vertical; min-height: 120px; }
+    .vault-select { cursor: pointer; }
+    .vault-form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+
+    /* ファイルアップロード */
+    .upload-area {
+      border: 2px dashed var(--border); border-radius: 10px;
+      padding: 20px 16px; text-align: center; cursor: pointer;
+      transition: all 0.2s;
+    }
+    .upload-area:hover, .upload-area.dragover {
+      border-color: var(--accent); background: var(--bg);
+    }
+    .upload-area-icon { font-size: 28px; margin-bottom: 6px; }
+    .upload-area-text { font-size: 13px; color: var(--muted); }
+    .upload-area-types { font-size: 11px; color: var(--muted); margin-top: 4px; }
+    .upload-cat-row { display: flex; gap: 8px; align-items: center; margin-top: 10px; justify-content: center; }
+
+    /* 右パネル */
+    .vault-right { position: sticky; top: 80px; }
+    .vault-list-header {
+      display: flex; gap: 6px; align-items: center;
+      flex-wrap: wrap; margin-bottom: 14px;
+    }
+    .filter-btn {
+      padding: 4px 12px; border-radius: 99px; font-size: 12px; font-weight: 500;
+      border: 1px solid var(--border); background: transparent;
+      color: var(--muted); cursor: pointer; transition: all 0.2s;
+    }
+    .filter-btn.active {
+      background: var(--accent); border-color: var(--accent);
+      color: #fff;
+    }
+    .filter-select {
+      padding: 4px 10px; border-radius: 99px; font-size: 12px;
+      border: 1px solid var(--border); background: var(--surface);
+      color: var(--muted); cursor: pointer; outline: none;
+    }
+
+    /* アイテム */
+    .vault-item {
+      border: 1px solid var(--border); border-radius: 10px;
+      padding: 12px 14px; margin-bottom: 8px;
+      transition: border-color 0.2s; cursor: pointer;
+    }
+    .vault-item:hover { border-color: var(--accent); }
+    .vault-item-header { display: flex; align-items: flex-start; gap: 8px; }
+    .vault-item-icon { font-size: 18px; flex-shrink: 0; }
+    .vault-item-meta { flex: 1; min-width: 0; }
+    .vault-item-title {
+      font-size: 13px; font-weight: 600; margin-bottom: 3px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .vault-item-info { font-size: 11px; color: var(--muted); display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    .vault-item-badge { display: inline-block; padding: 1px 7px; border-radius: 99px; font-size: 10px; }
+    .vault-item-actions { display: flex; gap: 4px; flex-shrink: 0; }
+    .vault-item-body {
+      display: none; margin-top: 10px; padding-top: 10px;
+      border-top: 1px solid var(--border);
+      font-size: 12px; color: var(--muted); line-height: 1.6;
+      white-space: pre-wrap; max-height: 200px; overflow-y: auto;
+    }
+    .vault-item.open .vault-item-body { display: block; }
+
+    .btn-xs {
+      padding: 3px 8px; border-radius: 5px; font-size: 11px; cursor: pointer;
+      border: 1px solid var(--border); background: transparent; color: var(--muted);
+    }
+    .btn-xs:hover { color: var(--text); }
+    .btn-xs-danger { border-color: rgba(220,53,69,0.3); color: #dc3545; }
+    .btn-xs-danger:hover { background: rgba(220,53,69,0.1); }
+
+    .empty-state { text-align: center; padding: 32px; color: var(--muted); font-size: 13px; }
+    .upload-progress { text-align:center; padding:12px; color:var(--muted); font-size:12px; display:none; }
+
+    @media (max-width: 768px) {
+      .vault-layout { grid-template-columns: 1fr; }
+      .vault-right { position: static; }
+    }
+  </style>
 </head>
 <body>
-
 <nav>
   <span class="nav-logo"><img src="/static/aura_icon_256.png" style="width:24px;height:24px;vertical-align:middle;margin-right:8px;border-radius:4px;">AURA</span>
   <div class="nav-links">
@@ -22,12 +133,249 @@
   </div>
 </nav>
 
-<main style="max-width:720px; margin:60px auto; padding:0 24px; text-align:center;">
-  <div style="font-size:48px; margin-bottom:16px;">🗄️</div>
-  <h1 style="font-size:28px; margin-bottom:8px;">保管庫</h1>
-  <p style="color:var(--muted); font-size:14px;">テキストメモやファイルを蓄積する場所です。<br>現在実装中です。</p>
-</main>
+<div class="vault-layout">
 
-<script src="/static/js/recorder.js"></script>
+  <!-- 左：追加エリア -->
+  <div class="vault-left">
+
+    <!-- テキストメモ -->
+    <div class="vault-panel">
+      <div class="vault-panel-title">📝 テキストメモを追加</div>
+      <input id="memoTitle" class="vault-input" type="text" placeholder="タイトル（任意）" maxlength="100" />
+      <select id="memoCategoryId" class="vault-input vault-select"></select>
+      <textarea id="memoBody" class="vault-input vault-textarea" placeholder="メモ内容を入力してください..."></textarea>
+      <div class="vault-form-actions">
+        <button class="btn-xs" onclick="clearMemoForm()">クリア</button>
+        <button class="save-btn" onclick="saveMemo()" style="padding:7px 18px;font-size:13px;">💾 保存</button>
+      </div>
+    </div>
+
+    <!-- ファイルアップロード -->
+    <div class="vault-panel">
+      <div class="vault-panel-title">📎 ファイルをアップロード</div>
+      <div class="upload-area" id="uploadArea"
+        onclick="document.getElementById('fileInput').click()"
+        ondragover="handleDragOver(event)"
+        ondragleave="handleDragLeave()"
+        ondrop="handleDrop(event)">
+        <div class="upload-area-icon">📂</div>
+        <div class="upload-area-text">クリックまたはドラッグ＆ドロップ</div>
+        <div class="upload-area-types">PDF・Word・Excel・PowerPoint・テキスト対応</div>
+      </div>
+      <div class="upload-cat-row">
+        <span style="font-size:12px;color:var(--muted);">カテゴリ：</span>
+        <select id="fileCategoryId" class="filter-select" onclick="event.stopPropagation()"></select>
+      </div>
+      <div class="upload-progress" id="uploadProgress">⏳ アップロード・要約処理中...</div>
+      <input type="file" id="fileInput" style="display:none;"
+        accept=".pdf,.docx,.xlsx,.pptx,.txt,.md" onchange="handleFileSelect(event)" />
+    </div>
+
+  </div>
+
+  <!-- 右：一覧 -->
+  <div class="vault-right">
+    <div class="vault-panel" style="max-height:calc(100vh - 120px);overflow-y:auto;">
+      <div class="vault-panel-title">🗄️ 保管データ一覧</div>
+
+      <!-- フィルタ -->
+      <div class="vault-list-header">
+        <button class="filter-btn active" onclick="setTypeFilter('all')">すべて</button>
+        <button class="filter-btn" onclick="setTypeFilter('memo')">📝 メモ</button>
+        <button class="filter-btn" onclick="setTypeFilter('file')">📎 ファイル</button>
+        <select class="filter-select" id="categoryFilter" onchange="setCategoryFilter(this.value)">
+          <option value="">カテゴリ: すべて</option>
+        </select>
+      </div>
+
+      <div id="vaultList"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+let _categories = [], _typeFilter = 'all', _catFilter = null, _editingMemoId = null;
+let _memos = [], _files = [];
+
+document.addEventListener('DOMContentLoaded', async () => {
+  await loadCategories();
+  await loadAll();
+});
+
+// ── カテゴリ ──────────────────────────────────────
+async function loadCategories() {
+  const res = await fetch('/api/categories');
+  _categories = await res.json();
+  // 入力欄のselect
+  const opts = _categories.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+  ['memoCategoryId','fileCategoryId'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.innerHTML = opts;
+  });
+  // フィルタのselect
+  const catSel = document.getElementById('categoryFilter');
+  catSel.innerHTML = '<option value="">カテゴリ: すべて</option>' +
+    _categories.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+}
+
+function setTypeFilter(type) {
+  _typeFilter = type;
+  document.querySelectorAll('.filter-btn').forEach((b, i) => {
+    b.classList.toggle('active', ['all','memo','file'][i] === type);
+  });
+  renderList();
+}
+
+function setCategoryFilter(val) {
+  _catFilter = val ? parseInt(val) : null;
+  renderList();
+}
+
+// ── データ読み込み ────────────────────────────────
+async function loadAll() {
+  const [memosRes, filesRes] = await Promise.all([
+    fetch('/api/vault/memos'), fetch('/api/vault/files')
+  ]);
+  _memos = await memosRes.json();
+  _files = await filesRes.json();
+  renderList();
+}
+
+function renderList() {
+  const el = document.getElementById('vaultList');
+  const iconMap = {'.pdf':'📄','.docx':'📝','.xlsx':'📊','.pptx':'📊','.txt':'📃','.md':'📃'};
+
+  let items = [];
+
+  if (_typeFilter !== 'file') {
+    items.push(..._memos
+      .filter(m => _catFilter === null || m.category_id === _catFilter)
+      .map(m => ({ ...m, _type: 'memo' }))
+    );
+  }
+  if (_typeFilter !== 'memo') {
+    items.push(..._files
+      .filter(f => _catFilter === null || f.category_id === _catFilter)
+      .map(f => ({ ...f, _type: 'file' }))
+    );
+  }
+
+  // 日付降順
+  items.sort((a, b) => b.created_at.localeCompare(a.created_at));
+
+  if (!items.length) {
+    el.innerHTML = '<div class="empty-state">データがありません</div>';
+    return;
+  }
+
+  el.innerHTML = items.map(item => {
+    const cat  = _categories.find(c => c.id === item.category_id) || {name:'未分類',color:'#6B7280'};
+    const badge = `<span class="vault-item-badge" style="background:${cat.color}22;color:${cat.color};border:1px solid ${cat.color}44;">${cat.name}</span>`;
+
+    if (item._type === 'memo') {
+      return `<div class="vault-item" id="item-memo-${item.id}" onclick="toggleItem('item-memo-${item.id}')">
+        <div class="vault-item-header">
+          <div class="vault-item-icon">📝</div>
+          <div class="vault-item-meta">
+            <div class="vault-item-title">${escHtml(item.title||'無題')}</div>
+            <div class="vault-item-info">${badge}<span>${item.created_at.slice(0,10)}</span></div>
+          </div>
+          <div class="vault-item-actions">
+            <button class="btn-xs" onclick="event.stopPropagation();editMemo(${item.id})">✏️</button>
+            <button class="btn-xs btn-xs-danger" onclick="event.stopPropagation();deleteMemo(${item.id})">🗑️</button>
+          </div>
+        </div>
+        <div class="vault-item-body">${escHtml(item.body)}</div>
+      </div>`;
+    } else {
+      const icon   = iconMap[item.filetype]||'📎';
+      const status = item.summary_status==='pending' ? ' ⏳' : item.summary_status==='error' ? ' ❌' : '';
+      return `<div class="vault-item" id="item-file-${item.id}" onclick="toggleItem('item-file-${item.id}')">
+        <div class="vault-item-header">
+          <div class="vault-item-icon">${icon}</div>
+          <div class="vault-item-meta">
+            <div class="vault-item-title">${escHtml(item.original_name)}${status}</div>
+            <div class="vault-item-info">${badge}<span>${item.filetype.toUpperCase()}</span><span>${item.created_at.slice(0,10)}</span></div>
+          </div>
+          <div class="vault-item-actions">
+            <button class="btn-xs" onclick="event.stopPropagation();openFolder(${item.id})">📂</button>
+            <button class="btn-xs btn-xs-danger" onclick="event.stopPropagation();deleteFile(${item.id})">🗑️</button>
+          </div>
+        </div>
+        ${item.summary ? `<div class="vault-item-body">${escHtml(item.summary)}</div>` : ''}
+      </div>`;
+    }
+  }).join('');
+}
+
+// ── テキストメモ ──────────────────────────────────
+async function saveMemo() {
+  const title = document.getElementById('memoTitle').value.trim();
+  const body  = document.getElementById('memoBody').value.trim();
+  const catId = parseInt(document.getElementById('memoCategoryId').value);
+  if (!body) { showToast('❌ 本文を入力してください'); return; }
+  const url    = _editingMemoId ? `/api/vault/memos/${_editingMemoId}` : '/api/vault/memos';
+  const method = _editingMemoId ? 'PUT' : 'POST';
+  await fetch(url, { method, headers:{'Content-Type':'application/json'}, body: JSON.stringify({title, body, category_id: catId}) });
+  showToast(_editingMemoId ? '✅ 更新しました' : '✅ 保存しました');
+  clearMemoForm(); await loadAll();
+}
+
+function editMemo(id) {
+  const m = _memos.find(x => x.id === id); if (!m) return;
+  _editingMemoId = id;
+  document.getElementById('memoTitle').value = m.title || '';
+  document.getElementById('memoBody').value  = m.body  || '';
+  document.getElementById('memoCategoryId').value = m.category_id;
+  document.querySelector('.vault-left').scrollIntoView({behavior:'smooth'});
+  showToast('✏️ 編集モードです。変更後に保存してください');
+}
+
+async function deleteMemo(id) {
+  if (!confirm('このメモを削除しますか？')) return;
+  await fetch(`/api/vault/memos/${id}`, {method:'DELETE'});
+  showToast('🗑️ 削除しました'); await loadAll();
+}
+
+function clearMemoForm() {
+  _editingMemoId = null;
+  document.getElementById('memoTitle').value = '';
+  document.getElementById('memoBody').value  = '';
+}
+
+// ── ファイル ──────────────────────────────────────
+function handleDragOver(e) { e.preventDefault(); document.getElementById('uploadArea').classList.add('dragover'); }
+function handleDragLeave() { document.getElementById('uploadArea').classList.remove('dragover'); }
+async function handleDrop(e) { e.preventDefault(); document.getElementById('uploadArea').classList.remove('dragover'); if (e.dataTransfer.files[0]) await uploadFile(e.dataTransfer.files[0]); }
+async function handleFileSelect(e) { if (e.target.files[0]) await uploadFile(e.target.files[0]); e.target.value=''; }
+
+async function uploadFile(file) {
+  const catId = document.getElementById('fileCategoryId').value;
+  const fd    = new FormData(); fd.append('file', file); fd.append('category_id', catId);
+  document.getElementById('uploadProgress').style.display = 'block';
+  try {
+    const data = await fetch('/api/vault/files', {method:'POST', body:fd}).then(r=>r.json());
+    showToast(data.status==='ok' ? '✅ '+data.message : '❌ '+(data.message||'エラー'));
+    await loadAll();
+    // 要約完了後に再読み込み
+    setTimeout(loadAll, 8000);
+  } catch(e) { showToast('❌ アップロードエラー'); }
+  document.getElementById('uploadProgress').style.display = 'none';
+}
+
+async function deleteFile(id) {
+  if (!confirm('このファイルを削除しますか？')) return;
+  await fetch(`/api/vault/files/${id}`, {method:'DELETE'});
+  showToast('🗑️ 削除しました'); await loadAll();
+}
+
+async function openFolder(id) { await fetch(`/api/vault/files/${id}/open-folder`, {method:'POST'}); }
+
+// ── ユーティリティ ────────────────────────────────
+function toggleItem(id) { document.getElementById(id)?.classList.toggle('open'); }
+function escHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function showToast(msg) { const t=document.createElement('div'); t.className='toast'; t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.classList.add('show'),10); setTimeout(()=>{t.classList.remove('show');setTimeout(()=>t.remove(),300);},3000); }
+function shutdownApp() { if(!confirm('AURAを終了しますか？'))return; fetch('/api/shutdown',{method:'POST'}).catch(()=>{}); window.close(); setTimeout(()=>{document.body.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:Arial;color:#888;">AURAを終了しました。このタブを閉じてください。</div>';},500); }
+</script>
 </body>
 </html>

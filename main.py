@@ -21,6 +21,15 @@ from app.database import (
     update_category,
     delete_category,
     delete_recordings_by_category,
+    get_all_vault_memos,
+    create_vault_memo,
+    update_vault_memo,
+    delete_vault_memo,
+    get_all_vault_files,
+    create_vault_file,
+    update_vault_file_summary,
+    delete_vault_file,
+    delete_vault_items_by_category,
 )
 from app.services.recorder import delete_recording as delete_wav
 from app.services.recorder import get_status, list_recordings, start, stop
@@ -143,6 +152,158 @@ def index():
     return render_template("index.html", active_page="index")
 
 
+
+
+# ══════════════════════════════════════════════════
+#  保管庫 API
+# ══════════════════════════════════════════════════
+
+VAULT_DIR = BASE_DIR / "vault"
+VAULT_DIR.mkdir(exist_ok=True)
+
+ALLOWED_EXTENSIONS = {".pdf", ".docx", ".xlsx", ".pptx", ".txt", ".md"}
+
+
+@app.route("/api/vault/memos", methods=["GET"])
+def vault_memos_get():
+    category_id = request.args.get("category_id", type=int)
+    return jsonify(get_all_vault_memos(category_id=category_id)), 200
+
+
+@app.route("/api/vault/memos", methods=["POST"])
+def vault_memos_create():
+    data        = request.get_json(silent=True) or {}
+    title       = data.get("title", "").strip()
+    body        = data.get("body", "").strip()
+    category_id = int(data.get("category_id", 1) or 1)
+    if not body:
+        return jsonify({"status": "error", "message": "本文は必須です"}), 400
+    memo_id = create_vault_memo(title or "無題", body, category_id)
+    return jsonify({"status": "ok", "id": memo_id}), 200
+
+
+@app.route("/api/vault/memos/<int:memo_id>", methods=["PUT"])
+def vault_memos_update(memo_id):
+    data        = request.get_json(silent=True) or {}
+    title       = data.get("title", "").strip()
+    body        = data.get("body", "").strip()
+    category_id = int(data.get("category_id", 1) or 1)
+    if not body:
+        return jsonify({"status": "error", "message": "本文は必須です"}), 400
+    return jsonify(update_vault_memo(memo_id, title or "無題", body, category_id)), 200
+
+
+@app.route("/api/vault/memos/<int:memo_id>", methods=["DELETE"])
+def vault_memos_delete(memo_id):
+    return jsonify(delete_vault_memo(memo_id)), 200
+
+
+@app.route("/api/vault/files", methods=["GET"])
+def vault_files_get():
+    category_id = request.args.get("category_id", type=int)
+    return jsonify(get_all_vault_files(category_id=category_id)), 200
+
+
+@app.route("/api/vault/files", methods=["POST"])
+def vault_files_upload():
+    """ファイルをアップロードしてOllamaで要約する"""
+    if "file" not in request.files:
+        return jsonify({"status": "error", "message": "ファイルが選択されていません"}), 400
+
+    file        = request.files["file"]
+    category_id = int(request.form.get("category_id", 1) or 1)
+    ext         = Path(file.filename).suffix.lower()
+
+    if ext not in ALLOWED_EXTENSIONS:
+        return jsonify({"status": "error", "message": f"対応していないファイル形式です: {ext}"}), 400
+
+    # ファイルを保存
+    import uuid
+    filename    = f"{uuid.uuid4().hex}{ext}"
+    save_path   = VAULT_DIR / filename
+    file.save(str(save_path))
+
+    # DBに登録
+    file_id = create_vault_file(filename, file.filename, ext, category_id)
+
+    # バックグラウンドでOllama要約
+    def _summarize():
+        try:
+            text = _extract_text(save_path, ext)
+            if not text:
+                update_vault_file_summary(file_id, "（テキストを抽出できませんでした）")
+                return
+            from app.services.transcriber import _summarize_ollama
+            summary = _summarize_ollama(text)
+            update_vault_file_summary(file_id, summary)
+            print(f"[vault] ファイル要約完了: {file.filename}")
+        except Exception as e:
+            print(f"[vault] ファイル要約エラー: {e}")
+            update_vault_file_summary(file_id, f"（要約エラー: {str(e)}）")
+
+    import threading
+    threading.Thread(target=_summarize, daemon=True).start()
+
+    return jsonify({"status": "ok", "id": file_id, "message": "アップロードしました。要約処理中です。"}), 200
+
+
+def _extract_text(path: Path, ext: str) -> str:
+    """ファイルからテキストを抽出する"""
+    try:
+        if ext == ".pdf":
+            import fitz
+            doc  = fitz.open(str(path))
+            return "\n".join(page.get_text() for page in doc)
+        elif ext == ".docx":
+            from docx import Document
+            doc = Document(str(path))
+            return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+        elif ext == ".xlsx":
+            import openpyxl
+            wb   = openpyxl.load_workbook(str(path), data_only=True)
+            rows = []
+            for ws in wb.worksheets:
+                for row in ws.iter_rows(values_only=True):
+                    r = [str(c) for c in row if c is not None]
+                    if r:
+                        rows.append("\t".join(r))
+            return "\n".join(rows)
+        elif ext == ".pptx":
+            from pptx import Presentation
+            prs  = Presentation(str(path))
+            rows = []
+            for slide in prs.slides:
+                for shape in slide.shapes:
+                    if hasattr(shape, "text") and shape.text.strip():
+                        rows.append(shape.text)
+            return "\n".join(rows)
+        elif ext in (".txt", ".md"):
+            return path.read_text(encoding="utf-8", errors="ignore")
+    except Exception as e:
+        print(f"[vault] テキスト抽出エラー: {e}")
+    return ""
+
+
+@app.route("/api/vault/files/<int:file_id>", methods=["DELETE"])
+def vault_files_delete(file_id):
+    result = delete_vault_file(file_id)
+    if result["status"] == "ok":
+        # 実ファイルも削除
+        file_path = VAULT_DIR / result["filename"]
+        if file_path.exists():
+            file_path.unlink()
+    return jsonify(result), 200
+
+
+@app.route("/api/vault/files/<int:file_id>/open-folder", methods=["POST"])
+def vault_open_folder(file_id):
+    """保存フォルダをエクスプローラーで開く"""
+    import subprocess, platform
+    if platform.system() == "Windows":
+        subprocess.Popen(f'explorer "{VAULT_DIR}"')
+    else:
+        subprocess.Popen(["open", str(VAULT_DIR)])
+    return jsonify({"status": "ok"}), 200
 
 @app.route("/vault")
 def vault_page():

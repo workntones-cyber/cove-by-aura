@@ -93,6 +93,34 @@ def init_db() -> None:
             WHERE ai_summary != '' AND summary_status = 'pending'
         """)
 
+
+        # ── 保管庫：テキストメモテーブル ─────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS vault_memos (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                title       TEXT    NOT NULL DEFAULT '',
+                body        TEXT    NOT NULL DEFAULT '',
+                category_id INTEGER NOT NULL DEFAULT 1
+                            REFERENCES categories(id) ON UPDATE CASCADE,
+                created_at  TEXT    NOT NULL,
+                updated_at  TEXT    NOT NULL
+            )
+        """)
+
+        # ── 保管庫：ファイルテーブル ──────────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS vault_files (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename      TEXT    NOT NULL,
+                original_name TEXT    NOT NULL,
+                filetype      TEXT    NOT NULL,
+                summary       TEXT    NOT NULL DEFAULT '',
+                summary_status TEXT   NOT NULL DEFAULT 'pending',
+                category_id   INTEGER NOT NULL DEFAULT 1
+                              REFERENCES categories(id) ON UPDATE CASCADE,
+                created_at    TEXT    NOT NULL
+            )
+        """)
         conn.commit()
     print("[database] 初期化完了")
 
@@ -298,3 +326,120 @@ def delete_all_recordings() -> int:
         conn.commit()
     print(f"[database] 全録音削除: {count}件")
     return count
+
+# ══════════════════════════════════════════════════
+#  保管庫：テキストメモ操作
+# ══════════════════════════════════════════════════
+
+def get_all_vault_memos(category_id: int = None) -> list[dict]:
+    with get_connection() as conn:
+        if category_id is not None:
+            rows = conn.execute(
+                "SELECT * FROM vault_memos WHERE category_id = ? ORDER BY created_at DESC",
+                (category_id,)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM vault_memos ORDER BY created_at DESC"
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def create_vault_memo(title: str, body: str, category_id: int = 1) -> int:
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "INSERT INTO vault_memos (title, body, category_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (title.strip(), body.strip(), category_id, now, now)
+        )
+        conn.commit()
+    print(f"[database] 保管庫メモ作成: id={cursor.lastrowid}")
+    return cursor.lastrowid
+
+
+def update_vault_memo(memo_id: int, title: str, body: str, category_id: int) -> dict:
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE vault_memos SET title=?, body=?, category_id=?, updated_at=? WHERE id=?",
+            (title.strip(), body.strip(), category_id, now, memo_id)
+        )
+        conn.commit()
+    return {"status": "ok"}
+
+
+def delete_vault_memo(memo_id: int) -> dict:
+    with get_connection() as conn:
+        conn.execute("DELETE FROM vault_memos WHERE id=?", (memo_id,))
+        conn.commit()
+    print(f"[database] 保管庫メモ削除: id={memo_id}")
+    return {"status": "ok"}
+
+
+# ══════════════════════════════════════════════════
+#  保管庫：ファイル操作
+# ══════════════════════════════════════════════════
+
+def get_all_vault_files(category_id: int = None) -> list[dict]:
+    with get_connection() as conn:
+        if category_id is not None:
+            rows = conn.execute(
+                "SELECT * FROM vault_files WHERE category_id = ? ORDER BY created_at DESC",
+                (category_id,)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM vault_files ORDER BY created_at DESC"
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def create_vault_file(filename: str, original_name: str, filetype: str, category_id: int = 1) -> int:
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_connection() as conn:
+        cursor = conn.execute(
+            """INSERT INTO vault_files
+               (filename, original_name, filetype, summary, summary_status, category_id, created_at)
+               VALUES (?, ?, ?, '', 'pending', ?, ?)""",
+            (filename, original_name, filetype, category_id, now)
+        )
+        conn.commit()
+    print(f"[database] 保管庫ファイル作成: id={cursor.lastrowid} name={original_name}")
+    return cursor.lastrowid
+
+
+def update_vault_file_summary(file_id: int, summary: str) -> None:
+    status = "done" if summary else "error"
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE vault_files SET summary=?, summary_status=? WHERE id=?",
+            (summary, status, file_id)
+        )
+        conn.commit()
+    print(f"[database] 保管庫ファイル要約保存: id={file_id}")
+
+
+def delete_vault_file(file_id: int) -> dict:
+    with get_connection() as conn:
+        row = conn.execute("SELECT filename FROM vault_files WHERE id=?", (file_id,)).fetchone()
+        if not row:
+            return {"status": "error", "message": "ファイルが見つかりません"}
+        conn.execute("DELETE FROM vault_files WHERE id=?", (file_id,))
+        conn.commit()
+    print(f"[database] 保管庫ファイル削除: id={file_id}")
+    return {"status": "ok", "filename": row["filename"]}
+
+
+def delete_vault_items_by_category(category_id: int) -> int:
+    """指定カテゴリの保管庫データ（メモ・ファイル）を全削除"""
+    with get_connection() as conn:
+        memo_count = conn.execute(
+            "SELECT COUNT(*) FROM vault_memos WHERE category_id=?", (category_id,)
+        ).fetchone()[0]
+        file_count = conn.execute(
+            "SELECT COUNT(*) FROM vault_files WHERE category_id=?", (category_id,)
+        ).fetchone()[0]
+        conn.execute("DELETE FROM vault_memos WHERE category_id=?", (category_id,))
+        conn.execute("DELETE FROM vault_files WHERE category_id=?", (category_id,))
+        conn.commit()
+    return memo_count + file_count
