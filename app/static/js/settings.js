@@ -9,7 +9,144 @@ let apiKeyVisible = false;
 // ── 初期化 ────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
   await loadSettings();
+  await loadCategories();
 });
+
+
+// ══════════════════════════════════════════════════
+//  カテゴリ管理
+// ══════════════════════════════════════════════════
+
+let _categories = [];
+
+async function loadCategories() {
+  try {
+    const res  = await fetch('/api/categories');
+    _categories = await res.json();
+    renderCategoryList();
+    renderDeleteByCategorySelect();
+  } catch (e) {
+    console.error('カテゴリ取得エラー', e);
+  }
+}
+
+function renderCategoryList() {
+  const el = document.getElementById('categoryList');
+  if (!el) return;
+
+  if (_categories.length === 0) {
+    el.innerHTML = '<p style="color:var(--muted);font-size:12px;">カテゴリがありません</p>';
+    return;
+  }
+
+  el.innerHTML = _categories.map(cat => `
+    <div style="display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid var(--border);">
+      <span style="width:16px;height:16px;border-radius:50%;background:${cat.color};flex-shrink:0;"></span>
+      ${cat.id === 1
+        ? `<span style="flex:1; font-size:13px; color:var(--muted);">${escHtml(cat.name)}（削除不可）</span>`
+        : `<input class="api-key-input" value="${escHtml(cat.name)}" id="cat-name-${cat.id}"
+            style="flex:1; padding:4px 8px; font-size:13px;" maxlength="20" />
+           <input type="color" value="${cat.color}" id="cat-color-${cat.id}"
+            style="width:32px;height:32px;border:none;border-radius:6px;cursor:pointer;background:none;" />
+           <button onclick="saveCategory(${cat.id})"
+            style="padding:4px 10px;font-size:12px;border-radius:6px;border:1px solid var(--accent);
+                   background:transparent;color:var(--accent);cursor:pointer;">保存</button>
+           <button onclick="deleteCategory(${cat.id})"
+            style="padding:4px 10px;font-size:12px;border-radius:6px;border:1px solid #dc3545;
+                   background:transparent;color:#dc3545;cursor:pointer;">削除</button>`
+      }
+    </div>
+  `).join('');
+}
+
+function renderDeleteByCategorySelect() {
+  const sel = document.getElementById('deleteByCategorySelect');
+  if (!sel) return;
+  sel.innerHTML = _categories.map(cat =>
+    `<option value="${cat.id}">${cat.name}</option>`
+  ).join('');
+}
+
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+async function addCategory() {
+  const nameEl  = document.getElementById('newCategoryName');
+  const colorEl = document.getElementById('newCategoryColor');
+  const name    = nameEl.value.trim();
+  if (!name) { showToast('❌ カテゴリ名を入力してください'); return; }
+
+  const res  = await fetch('/api/categories', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, color: colorEl.value }),
+  });
+  const data = await res.json();
+  if (data.status === 'ok') {
+    nameEl.value = '';
+    colorEl.value = '#6B7280';
+    showToast('✅ カテゴリを追加しました');
+    await loadCategories();
+  } else {
+    showToast('❌ ' + (data.message || 'エラーが発生しました'));
+  }
+}
+
+async function saveCategory(id) {
+  const name  = document.getElementById(`cat-name-${id}`)?.value.trim();
+  const color = document.getElementById(`cat-color-${id}`)?.value;
+  if (!name) { showToast('❌ カテゴリ名を入力してください'); return; }
+
+  const res  = await fetch(`/api/categories/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, color }),
+  });
+  const data = await res.json();
+  if (data.status === 'ok') {
+    showToast('✅ カテゴリを更新しました');
+    await loadCategories();
+  } else {
+    showToast('❌ ' + (data.message || 'エラーが発生しました'));
+  }
+}
+
+async function deleteCategory(id) {
+  const cat = _categories.find(c => c.id === id);
+  if (!cat) return;
+  if (!confirm(`カテゴリ「${cat.name}」を削除しますか？\nこのカテゴリのデータは「未分類」に移動します。`)) return;
+
+  const res  = await fetch(`/api/categories/${id}`, { method: 'DELETE' });
+  const data = await res.json();
+  if (data.status === 'ok') {
+    showToast('✅ カテゴリを削除しました');
+    await loadCategories();
+  } else {
+    showToast('❌ ' + (data.message || 'エラーが発生しました'));
+  }
+}
+
+async function confirmDeleteByCategory() {
+  const sel = document.getElementById('deleteByCategorySelect');
+  if (!sel) return;
+  const id  = parseInt(sel.value);
+  const cat = _categories.find(c => c.id === id);
+  if (!cat) return;
+  if (!confirm(`カテゴリ「${cat.name}」の録音データをすべて削除しますか？\nこの操作は取り消せません。`)) return;
+
+  const res  = await fetch(`/api/categories/${id}/recordings`, { method: 'DELETE' });
+  const data = await res.json();
+  if (data.status === 'ok') {
+    showToast(`✅ ${data.deleted}件の録音データを削除しました`);
+  } else {
+    showToast('❌ ' + (data.message || 'エラーが発生しました'));
+  }
+}
 
 async function loadSettings() {
   try {

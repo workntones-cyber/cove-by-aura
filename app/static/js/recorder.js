@@ -18,6 +18,7 @@ const speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
 // ── 初期化 ────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   buildVisualizer();
+  loadCategories();
   loadHistory();
   checkApiKey();
   checkBlackHole();
@@ -103,8 +104,9 @@ async function stopRecording() {
   document.getElementById('recordTimer').classList.remove('visible');
   document.getElementById('visualizer').classList.remove('recording');
 
-  const title = document.getElementById('titleInput').value || '無題';
-  const memo  = document.getElementById('memoInput').value  || '';
+  const title      = document.getElementById('titleInput').value || '無題';
+  const memo       = document.getElementById('memoInput').value  || '';
+  const categoryId = parseInt(document.getElementById('categorySelect')?.value || '1');
 
   const res  = await fetch('/api/record/stop', {
     method: 'POST',
@@ -304,7 +306,9 @@ async function loadHistory() {
       <div class="history-header" onclick="toggleHistory(${r.id})">
         <div class="history-icon">🎙️</div>
         <div class="history-meta">
-          <div class="history-title">${escHtml(r.title)}</div>
+          <div class="history-title">${escHtml(r.title)}
+            ${(() => { const cat = getCategoryById(r.category_id || 1); return `<span style="display:inline-block;padding:1px 8px;border-radius:99px;font-size:11px;background:${cat.color}22;color:${cat.color};border:1px solid ${cat.color}44;margin-left:6px;">${cat.name}</span>`; })()}
+          </div>
           <div class="history-date">${r.created_at}</div>
         </div>
         <div class="history-chevron">▾</div>
@@ -313,6 +317,14 @@ async function loadHistory() {
       <div class="history-body">
         <div class="history-divider"></div>
 
+        <div class="history-edit-row">
+          <select class="history-edit-input" id="edit-category-${r.id}"
+            style="cursor:pointer;" onchange="updateRecordingCategory(${r.id}, this.value)">
+            ${_categories.map(cat =>
+              `<option value="${cat.id}" ${cat.id === (r.category_id || 1) ? 'selected' : ''}>${cat.name}</option>`
+            ).join('')}
+          </select>
+        </div>
         <div class="history-edit-row">
           <input class="history-edit-input" id="edit-title-${r.id}"
             type="text" value="${escHtml(r.title)}" placeholder="タイトル" />
@@ -640,6 +652,30 @@ function showModelBanner(msg, type) {
     <div class="api-warning-text">${msg}</div>`;
 }
 
+// ── カテゴリ管理 ──────────────────────────────────
+let _categories = [];
+
+async function loadCategories() {
+  try {
+    const res = await fetch('/api/categories');
+    _categories = await res.json();
+    renderCategorySelect();
+  } catch (e) {}
+}
+
+function renderCategorySelect() {
+  const sel = document.getElementById('categorySelect');
+  if (!sel) return;
+  const current = sel.value;
+  sel.innerHTML = _categories.map(cat =>
+    `<option value="${cat.id}" ${cat.id == current ? 'selected' : ''}>${cat.name}</option>`
+  ).join('');
+}
+
+function getCategoryById(id) {
+  return _categories.find(c => c.id === parseInt(id)) || { name: '未分類', color: '#6B7280' };
+}
+
 // ── sessionStorage による入力保持 ────────────────
 function restoreInputs() {
   const titleEl = document.getElementById('titleInput');
@@ -776,6 +812,20 @@ function setRetryState(recordId, state) {
       summaryBtn.disabled         = true;
       summaryBtn.textContent      = '⏳ 要約中...';
       break;
+  }
+}
+
+async function updateRecordingCategory(recordId, categoryId) {
+  try {
+    await fetch(`/api/recordings/${recordId}/category`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ category_id: parseInt(categoryId) }),
+    });
+    showToast('✅ カテゴリを変更しました');
+    await loadHistory();
+  } catch (e) {
+    showToast('❌ カテゴリの変更に失敗しました');
   }
 }
 
