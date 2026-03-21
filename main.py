@@ -337,8 +337,7 @@ def vault_web_fetch():
                 text = text[:5000] + "..."
 
             if not text:
-                create_vault_memo(title, f"（テキストを抽出できませんでした）
-URL: {url}", category_id)
+                create_vault_memo(title, "（テキストを抽出できませんでした）\nURL: " + url, category_id)
                 return
 
             # Ollamaで要約
