@@ -9,11 +9,18 @@ from flask import Flask, jsonify, render_template, request, send_from_directory
 from app.database import (
     create_recording,
     delete_recording,
+    delete_all_recordings,
     get_all_recordings,
     get_recording,
     init_db,
     update_title_and_memo,
     update_transcript_and_summary,
+    update_recording_category,
+    get_all_categories,
+    create_category,
+    update_category,
+    delete_category,
+    delete_recordings_by_category,
 )
 from app.services.recorder import delete_recording as delete_wav
 from app.services.recorder import get_status, list_recordings, start, stop
@@ -44,6 +51,63 @@ init_db()
 #  ページルーティング
 # ══════════════════════════════════════════════════
 
+
+
+# ══════════════════════════════════════════════════
+#  カテゴリ API
+# ══════════════════════════════════════════════════
+
+@app.route("/api/categories", methods=["GET"])
+def categories_get():
+    """カテゴリ一覧を返す"""
+    return jsonify(get_all_categories()), 200
+
+
+@app.route("/api/categories", methods=["POST"])
+def categories_create():
+    """カテゴリを新規作成する"""
+    data  = request.get_json(silent=True) or {}
+    name  = data.get("name", "").strip()
+    color = data.get("color", "#6B7280").strip()
+    if not name:
+        return jsonify({"status": "error", "message": "カテゴリ名は必須です"}), 400
+    result = create_category(name, color)
+    return jsonify(result), 200 if result["status"] == "ok" else 400
+
+
+@app.route("/api/categories/<int:category_id>", methods=["PUT"])
+def categories_update(category_id):
+    """カテゴリ名・色を更新する"""
+    data  = request.get_json(silent=True) or {}
+    name  = data.get("name", "").strip()
+    color = data.get("color", "#6B7280").strip()
+    if not name:
+        return jsonify({"status": "error", "message": "カテゴリ名は必須です"}), 400
+    result = update_category(category_id, name, color)
+    return jsonify(result), 200 if result["status"] == "ok" else 400
+
+
+@app.route("/api/categories/<int:category_id>", methods=["DELETE"])
+def categories_delete(category_id):
+    """カテゴリを削除しデータを未分類に移動する"""
+    result = delete_category(category_id)
+    return jsonify(result), 200 if result["status"] == "ok" else 400
+
+
+@app.route("/api/categories/<int:category_id>/recordings", methods=["DELETE"])
+def categories_delete_recordings(category_id):
+    """指定カテゴリの録音データを全削除する"""
+    count = delete_recordings_by_category(category_id)
+    return jsonify({"status": "ok", "deleted": count}), 200
+
+
+@app.route("/api/recordings/<int:record_id>/category", methods=["PUT"])
+def recording_update_category(record_id):
+    """録音のカテゴリを更新する"""
+    data        = request.get_json(silent=True) or {}
+    category_id = data.get("category_id", 1)
+    result      = update_recording_category(record_id, category_id)
+    return jsonify(result), 200
 
 @app.route("/api/shutdown", methods=["POST"])
 def shutdown():
@@ -111,16 +175,18 @@ def record_stop():
     if result["status"] == "error":
         return jsonify(result), 500
 
-    # リクエストからタイトル・メモを取得（未入力の場合はデフォルト値）
-    data = request.get_json(silent=True) or {}
-    title = data.get("title", "無題").strip() or "無題"
-    memo = data.get("memo", "").strip()
+    # リクエストからタイトル・メモ・カテゴリを取得
+    data        = request.get_json(silent=True) or {}
+    title       = data.get("title", "無題").strip() or "無題"
+    memo        = data.get("memo", "").strip()
+    category_id = int(data.get("category_id", 1) or 1)
 
     # DBに登録
     record_id = create_recording(
         wav_file=result["filename"],
         title=title,
         memo=memo,
+        category_id=category_id,
     )
 
     return jsonify({
@@ -193,7 +259,8 @@ def recordings_list():
     過去の録音データを全件返す。
     Response: [{"id": int, "title": str, ...}, ...]
     """
-    return jsonify(get_all_recordings()), 200
+    category_id = request.args.get("category_id", type=int)
+    return jsonify(get_all_recordings(category_id=category_id)), 200
 
 
 @app.route("/api/recordings/<int:record_id>", methods=["PATCH"])
