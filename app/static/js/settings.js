@@ -541,3 +541,64 @@ async function shutdownApp() {
     document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:Arial;color:#888;font-size:18px;">AURAを終了しました。このタブを閉じてください。</div>';
   }, 500);
 }
+
+// ══════════════════════════════════════════════════
+//  ペルソナ管理
+// ══════════════════════════════════════════════════
+
+async function loadPersonas() {
+  const list = document.getElementById('personaList');
+  if (!list) return;
+  try {
+    const res  = await fetch('/api/personas');
+    const data = await res.json();
+    list.innerHTML = '';
+    data.forEach(p => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--bg2);border-radius:8px;';
+      row.innerHTML = `
+        <div>
+          <div style="font-size:14px;font-weight:500;">${p.persona_name}</div>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+          <span style="font-size:12px;color:var(--muted);">${p.enabled ? 'ON' : 'OFF'}</span>
+          <div class="toggle-wrap" style="position:relative;width:40px;height:22px;">
+            <input type="checkbox" ${p.enabled ? 'checked' : ''}
+              onchange="togglePersona('${p.persona_name}', this)"
+              style="opacity:0;position:absolute;width:100%;height:100%;cursor:pointer;margin:0;z-index:1;">
+            <div class="toggle-track" style="position:absolute;inset:0;background:${p.enabled ? '#7C6AF7' : 'var(--border)'};border-radius:11px;transition:background .2s;"></div>
+            <div class="toggle-thumb" style="position:absolute;top:3px;left:${p.enabled ? '21px' : '3px'};width:16px;height:16px;background:#fff;border-radius:50%;transition:left .2s;"></div>
+          </div>
+        </label>`;
+      list.appendChild(row);
+    });
+  } catch(e) {
+    console.error('ペルソナ読み込みエラー:', e);
+  }
+}
+
+async function togglePersona(name, checkbox) {
+  const enabled = checkbox.checked;
+  const wrap    = checkbox.parentElement;
+  wrap.querySelector('.toggle-track').style.background = enabled ? '#7C6AF7' : 'var(--border)';
+  wrap.querySelector('.toggle-thumb').style.left       = enabled ? '21px' : '3px';
+  wrap.previousElementSibling && (wrap.previousElementSibling.textContent = enabled ? 'ON' : 'OFF');
+  // ラベル内のspan更新
+  const span = checkbox.closest('label').querySelector('span');
+  if (span) span.textContent = enabled ? 'ON' : 'OFF';
+  try {
+    await fetch(`/api/personas/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ enabled }),
+    });
+    showToast(`${name} を${enabled ? 'ON' : 'OFF'}にしました`);
+  } catch(e) {
+    showToast('保存に失敗しました', true);
+  }
+}
+
+// ページ読み込み時にペルソナも取得
+document.addEventListener('DOMContentLoaded', () => {
+  loadPersonas();
+});

@@ -121,6 +121,49 @@ def init_db() -> None:
                 created_at    TEXT    NOT NULL
             )
         """)
+        # ── 相談室：ペルソナ設定テーブル ─────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS persona_settings (
+                persona_name TEXT PRIMARY KEY,
+                enabled      INTEGER NOT NULL DEFAULT 1
+            )
+        """)
+
+        # デフォルトペルソナを挿入（なければ）
+        default_personas = [
+            "戦略家", "リスク管理者", "アナリスト", "クリエイター",
+            "法務・コンプラ", "ユーザー視点", "クレーマー", "マーケッター",
+        ]
+        for name in default_personas:
+            conn.execute(
+                "INSERT OR IGNORE INTO persona_settings (persona_name, enabled) VALUES (?, 1)",
+                (name,)
+            )
+
+        # ── 相談室：セッションテーブル ────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS council_sessions (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                question       TEXT    NOT NULL DEFAULT '',
+                category_id    INTEGER NOT NULL DEFAULT 1
+                               REFERENCES categories(id) ON UPDATE CASCADE,
+                final_decision TEXT    NOT NULL DEFAULT '',
+                created_at     TEXT    NOT NULL
+            )
+        """)
+
+        # ── 相談室：採用回答テーブル ──────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS council_adopted (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id   INTEGER NOT NULL
+                             REFERENCES council_sessions(id) ON DELETE CASCADE,
+                persona_name TEXT    NOT NULL,
+                answer       TEXT    NOT NULL DEFAULT '',
+                created_at   TEXT    NOT NULL
+            )
+        """)
+
         conn.commit()
     print("[database] 初期化完了")
 
@@ -443,3 +486,126 @@ def delete_vault_items_by_category(category_id: int) -> int:
         conn.execute("DELETE FROM vault_files WHERE category_id=?", (category_id,))
         conn.commit()
     return memo_count + file_count
+
+
+# ══════════════════════════════════════════════════
+#  相談室：ペルソナ設定操作
+# ══════════════════════════════════════════════════
+
+def get_all_persona_settings() -> list[dict]:
+    """全ペルソナ設定を返す"""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT persona_name, enabled FROM persona_settings ORDER BY rowid"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def update_persona_enabled(persona_name: str, enabled: bool) -> dict:
+    """ペルソナのON/OFFを更新する"""
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE persona_settings SET enabled = ? WHERE persona_name = ?",
+            (1 if enabled else 0, persona_name)
+        )
+        conn.commit()
+    return {"status": "ok"}
+
+
+# ══════════════════════════════════════════════════
+#  相談室：セッション操作
+# ══════════════════════════════════════════════════
+
+def create_council_session(question: str, category_id: int, final_decision: str = "") -> int:
+    """相談セッションを作成し、IDを返す"""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "INSERT INTO council_sessions (question, category_id, final_decision, created_at) VALUES (?, ?, ?, ?)",
+            (question.strip(), category_id, final_decision.strip(), now)
+        )
+        conn.commit()
+    print(f"[database] 相談セッション作成: id={cursor.lastrowid}")
+    return cursor.lastrowid
+
+
+def update_council_session_decision(session_id: int, final_decision: str) -> dict:
+    """最終判断メモを更新する"""
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE council_sessions SET final_decision = ? WHERE id = ?",
+            (final_decision.strip(), session_id)
+        )
+        conn.commit()
+    return {"status": "ok"}
+
+
+def create_council_adopted(session_id: int, persona_name: str, answer: str) -> int:
+    """採用した回答を保存する"""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "INSERT INTO council_adopted (session_id, persona_name, answer, created_at) VALUES (?, ?, ?, ?)",
+            (session_id, persona_name, answer.strip(), now)
+        )
+        conn.commit()
+    print(f"[database] 採用回答保存: session={session_id} persona={persona_name}")
+    return cursor.lastrowid
+
+
+def get_council_sessions(category_id: int = None, limit: int = 20) -> list[dict]:
+    """相談履歴を返す（採用回答も含む）"""
+    with get_connection() as conn:
+        if category_id is not None:
+            sessions = conn.execute(
+                "SELECT * FROM council_sessions WHERE category_id = ? ORDER BY created_at DESC LIMIT ?",
+                (category_id, limit)
+            ).fetchall()
+        else:
+            sessions = conn.execute(
+                "SELECT * FROM council_sessions ORDER BY created_at DESC LIMIT ?",
+                (limit,)
+            ).fetchall()
+
+        result = []
+        for s in sessions:
+            s_dict = dict(s)
+            adopted = conn.execute(
+                "SELECT persona_name, answer FROM council_adopted WHERE session_id = ? ORDER BY created_at",
+                (s_dict["id"],)
+            ).fetchall()
+            s_dict["adopted"] = [dict(a) for a in adopted]
+            result.append(s_dict)
+    return result
+
+
+def get_context_for_category(category_id: int) -> dict:
+    """指定カテゴリに紐づくコンテキストデータを収集する"""
+    with get_connection() as conn:
+        recordings = conn.execute(
+            "SELECT id, title, ai_summary FROM recordings WHERE category_id = ? AND ai_summary != '' ORDER BY created_at DESC LIMIT 10",
+            (category_id,)
+        ).fetchall()
+        memos = conn.execute(
+            "SELECT id, title, body FROM vault_memos WHERE category_id = ? ORDER BY created_at DESC LIMIT 10",
+            (category_id,)
+        ).fetchall()
+        files = conn.execute(
+            "SELECT id, original_name, summary FROM vault_files WHERE category_id = ? AND summary != '' ORDER BY created_at DESC LIMIT 10",
+            (category_id,)
+        ).fetchall()
+        sessions = conn.execute(
+            """SELECT cs.question, cs.final_decision, ca.persona_name, ca.answer
+               FROM council_sessions cs
+               LEFT JOIN council_adopted ca ON ca.session_id = cs.id
+               WHERE cs.category_id = ?
+               ORDER BY cs.created_at DESC LIMIT 5""",
+            (category_id,)
+        ).fetchall()
+
+    return {
+        "recordings": [dict(r) for r in recordings],
+        "memos":      [dict(m) for m in memos],
+        "files":      [dict(f) for f in files],
+        "sessions":   [dict(s) for s in sessions],
+    }

@@ -30,6 +30,14 @@ from app.database import (
     update_vault_file_summary,
     delete_vault_file,
     delete_vault_items_by_category,
+    # Phase 3
+    get_all_persona_settings,
+    update_persona_enabled,
+    create_council_session,
+    update_council_session_decision,
+    create_council_adopted,
+    get_council_sessions,
+    get_context_for_category,
 )
 from app.services.recorder import delete_recording as delete_wav
 from app.services.recorder import get_status, list_recordings, start, stop
@@ -60,6 +68,22 @@ init_db()
 #  ページルーティング
 # ══════════════════════════════════════════════════
 
+@app.route("/vault")
+def vault():
+    """保管庫画面"""
+    return render_template("vault.html", active_page="vault")
+
+
+@app.route("/council")
+def council():
+    """相談室画面"""
+    return render_template("council.html", active_page="council")
+
+
+@app.route("/settings")
+def settings():
+    """設定画面"""
+    return render_template("settings.html", active_page="settings")
 
 
 # ══════════════════════════════════════════════════
@@ -562,21 +586,7 @@ def vault_open_folder(file_id):
         subprocess.Popen(["open", str(VAULT_DIR)])
     return jsonify({"status": "ok"}), 200
 
-@app.route("/vault")
-def vault_page():
-    """保管庫ページ（Phase 2で実装予定）"""
-    return render_template("vault.html", active_page="vault")
 
-
-@app.route("/council")
-def council_page():
-    """相談室ページ（Phase 3で実装予定）"""
-    return render_template("council.html", active_page="council")
-
-@app.route("/settings")
-def settings():
-    """設定画面"""
-    return render_template("settings.html", active_page="settings")
 
 
 # ══════════════════════════════════════════════════
@@ -996,6 +1006,374 @@ def model_status():
         return jsonify(get_model_status()), 200
     except Exception as e:
         return jsonify({"status": "idle", "error": str(e)}), 200
+
+
+# ══════════════════════════════════════════════════
+#  相談室 API
+# ══════════════════════════════════════════════════
+
+@app.route("/api/personas", methods=["GET"])
+def personas_get():
+    """ペルソナ設定一覧を返す"""
+    return jsonify(get_all_persona_settings()), 200
+
+
+@app.route("/api/personas/<string:persona_name>", methods=["PUT"])
+def personas_update(persona_name: str):
+    """ペルソナのON/OFFを更新する"""
+    data    = request.get_json(silent=True) or {}
+    enabled = bool(data.get("enabled", True))
+    result  = update_persona_enabled(persona_name, enabled)
+    return jsonify(result), 200
+
+
+@app.route("/api/council/ask", methods=["POST"])
+def council_ask():
+    """
+    相談を受け付けてSSEでペルソナ回答をストリーミングする。
+    Request JSON: {"question": str, "category_id": int, "personas": [str, ...]}
+    SSE events:
+      {"type": "start",    "persona": str}
+      {"type": "chunk",    "persona": str, "chunk": str}
+      {"type": "done",     "persona": str, "answer": str}
+      {"type": "finished"}
+      {"type": "error",    "message": str}
+    """
+    import json as _json
+    import urllib.request as _ureq
+    from app.services.transcriber import _get_ollama_model
+    from flask import Response, stream_with_context
+
+    data          = request.get_json(silent=True) or {}
+    question      = data.get("question", "").strip()
+    category_id   = int(data.get("category_id", 1) or 1)
+    persona_names = data.get("personas", [])
+    context_keys  = set(data.get("context_keys", None) or [])
+    # context_keys が None または未送信 → 全て使う
+    # context_keys が空リスト [] → 全てOFF（何も渡さない）
+    use_all_context = data.get("context_keys") is None  # キー自体がなければ全使用
+
+    if not question:
+        return jsonify({"status": "error", "message": "質問を入力してください"}), 400
+    if not persona_names:
+        return jsonify({"status": "error", "message": "参加ペルソナがいません"}), 400
+
+    # ── コンテキスト収集（context_keys でフィルタリング）──
+    ctx = get_context_for_category(category_id)
+
+    def build_context_text():
+        # 全部OFFの場合は空を返す
+        if not use_all_context and not context_keys:
+            return ""
+        parts = []
+        for r in ctx.get("recordings", []):
+            key = f"rec_{r['id']}"
+            if not use_all_context and key not in context_keys:
+                continue
+            if r.get("ai_summary"):
+                parts.append(f"[録音:{r['title']}]\n{r['ai_summary'][:300]}")
+        for m in ctx.get("memos", []):
+            key = f"memo_{m['id']}"
+            if not use_all_context and key not in context_keys:
+                continue
+            parts.append(f"[メモ:{m['title']}]\n{m['body'][:300]}")
+        for f in ctx.get("files", []):
+            key = f"file_{f['id']}"
+            if not use_all_context and key not in context_keys:
+                continue
+            if f.get("summary"):
+                parts.append(f"[ファイル:{f['original_name']}]\n{f['summary'][:300]}")
+        for s in ctx.get("sessions", []):
+            if s.get("final_decision"):
+                parts.append(f"[過去の決定] 質問:{s['question']} → {s['final_decision']}")
+        return "\n\n".join(parts)
+
+    context_text = build_context_text()
+
+    # ── ペルソナ定義（強化版） ──
+    PERSONA_SYSTEM = {
+        "戦略家": """あなたは20年以上のキャリアを持つ企業戦略顧問です。
+
+【あなたの思考スタイル】
+- 勝ちにいくことを最優先。リスクは「織り込み済み」として前進する
+- 「できない理由」ではなく「どうすれば勝てるか」だけを考える
+- 曖昧な表現・逃げの言葉は使わない。数字と期限で語る
+- 競合に勝つためなら大胆な決断も厭わない
+
+【回答の構造】
+■結論：一言で断定する（「〜すべきだ」「〜しろ」）
+■理由：なぜその判断か、根拠を2点挙げる
+■アクション：今すぐ着手すべき具体的な行動を1つ明示する
+
+【制約】
+- 400字以内・日本語・敬語不要・断定調
+- 自己紹介・前置き・「〜と思います」は禁止
+- 必ず具体的なアクションで締める""",
+
+        "リスク管理者": """あなたは大企業のリスク管理部門を15年率いてきた専門家です。
+
+【あなたの思考スタイル】
+- 最悪のシナリオを先に想定し、それを防ぐことを最優先する
+- 「問題が起きてから対処」ではなく「問題が起きる前に潰す」
+- 楽観的な見通しは信用しない。数字の裏を必ず確認する
+- リスクを指摘した上で、必ず現実的な対策もセットで提示する
+
+【回答の構造】
+■結論：このまま進む場合の最大リスクを一言で
+■リスク詳細：見落とされやすい問題点を2〜3点
+■対策アクション：リスクを下げるために今すぐできる具体策を1つ
+
+【制約】
+- 400字以内・日本語・敬語不要
+- 問題点だけでなく必ず対策もセットで述べる
+- 具体的なアクションで締める""",
+
+        "アナリスト": """あなたは外資系コンサルティングファーム出身のビジネスアナリストです。
+
+【あなたの思考スタイル】
+- 感情・直感・経験談は一切排除。データと論理だけで判断する
+- 「なんとなく」「おそらく」は禁句。根拠のない発言はしない
+- 仮説を立て、それを検証する思考プロセスを踏む
+- 数字がなければ「計測が必要」と明示する
+
+【回答の構造】
+■結論：データ・論理に基づく判断を一文で
+■根拠：客観的な事実・数値・比較を2点
+■次のアクション：意思決定に必要な情報収集または検証行動を1つ具体的に
+
+【制約】
+- 400字以内・日本語・敬語不要
+- 推測は「推測」と明記する
+- 必ず検証可能なアクションで締める""",
+
+        "クリエイター": """あなたは数々のヒット商品を生み出してきたクリエイティブディレクターです。
+
+【あなたの思考スタイル】
+- 「前例がない」は褒め言葉。既成概念は破るためにある
+- ユーザーが言語化できていないニーズを掘り起こす
+- 実現可能性より「面白いか」「誰も思いつかなかったか」を先に考える
+- ただし、アイデアは必ず「実行できる形」まで落とし込む
+
+【回答の構造】
+■結論：誰も思いつかなかった切り口を一言で
+■アイデアの核心：なぜそのアイデアが刺さるか、ユーザー心理と合わせて説明
+■最初の一手：アイデアを試すための最小限のアクションを1つ
+
+【制約】
+- 400字以内・日本語・敬語不要・エネルギッシュな文体
+- ありきたりな提案は禁止
+- 必ず「まず〇〇をやれ」という形で締める""",
+
+        "法務・コンプラ": """あなたは上場企業の法務部長として10年以上コンプライアンス管理を担ってきた専門家です。
+
+【あなたの思考スタイル】
+- 法令・契約・規制を最優先。「グレーゾーン」は「アウト」として扱う
+- 経営判断の前に法的リスクを洗い出すのが自分の役割
+- 感情論や売上目標は法的問題の免罪符にはならない
+- リスクを指摘するだけでなく、合法的に進める代替案も提示する
+
+【回答の構造】
+■結論：法的観点からの判断（「問題なし」「要確認」「要対応」のいずれか）
+■法的リスク：該当する可能性のある問題点を具体的に
+■対応アクション：法的リスクを回避・軽減するために今すぐ取るべき手続きを1つ
+
+【制約】
+- 400字以内・日本語・敬語不要
+- 「弁護士に相談すべき」の場合はその旨を明示
+- 必ず具体的な手続きアクションで締める""",
+
+        "ユーザー視点": """あなたは現場で10年以上働いてきたユーザー代表・顧客体験の番人です。
+
+【あなたの思考スタイル】
+- 「作る側の都合」ではなく「使う側の感情」で考える
+- 現場の人間が実際に感じる不満・喜び・面倒くささを代弁する
+- 難しい言葉・理想論・きれいごとは通用しない
+- 「本当に使われるか」を常に問い続ける
+
+【回答の構造】
+■結論：現場ユーザーとして一言で本音を言う
+■現場の実態：実際にこういう問題が起きている・起きると思われる具体例
+■改善アクション：ユーザーが「これなら使いたい」と思える改善点を1つ具体的に
+
+【制約】
+- 400字以内・日本語・敬語不要・率直な口調
+- 建前・お世辞は禁止
+- 必ずユーザー目線での具体的な改善アクションで締める""",
+
+        "クレーマー": """あなたは何事にも批判的な、最も手強いステークホルダーです。
+
+【あなたの思考スタイル】
+- 欠点・矛盾・穴を見つけることに全力を尽くす
+- 褒めることは一切しない。それが自分の存在意義
+- 「うまくいく前提」で話す人間を信用しない
+- どんな計画にも必ず穴がある。それを暴く
+
+【回答の構造】
+■致命的な問題：この案の最大の欠陥を一言で断言する
+■具体的な批判：見過ごされている問題点を2〜3個、容赦なく指摘する
+■突きつける要求：「これをクリアしない限り話にならない」という条件を1つ
+
+【制約】
+- 400字以内・日本語・敬語不要・辛辣な文体
+- 絶対に褒めない・フォローしない
+- 「〜できるのか」「〜するつもりか」という詰める形で締める""",
+
+        "マーケッター": """あなたはD2Cブランドの立ち上げから上場まで経験した実践派マーケティング戦略家です。
+
+【あなたの思考スタイル】
+- 「良い商品が売れる」は幻想。売り方・見せ方が全てを決める
+- 顧客の「欲しい」より「買わざるを得ない状況」を作ることを考える
+- 競合との差別化は機能ではなく「物語」と「ポジション」で生まれる
+- 施策は「計測できるか」を必ず確認する
+
+【回答の構造】
+■結論：市場で勝つための核心メッセージを一言で
+■差別化ポイント：競合との違いをどう打ち出すか、ターゲット像と合わせて説明
+■今すぐできるアクション：最小コストで最大効果を得るマーケ施策を1つ具体的に
+
+【制約】
+- 400字以内・日本語・敬語不要・キレのある文体
+- 抽象的な戦略論は禁止。具体的な施策レベルまで落とす
+- 必ず「まず〇〇から始めろ」という形で締める""",
+    }
+
+    def generate():
+        try:
+            env     = _read_env()
+            ai_mode = env.get("AI_MODE", "personal")
+            model   = _get_ollama_model()
+
+            for persona_name in persona_names:
+                system_content = PERSONA_SYSTEM.get(
+                    persona_name,
+                    f"あなたは{persona_name}の専門家です。質問に対して自分の立場から200字以内で日本語で答えてください。"
+                )
+
+                # user メッセージ：コンテキストがあれば添付、なければ質問のみ
+                if context_text:
+                    user_content = (
+                        f"以下の参考情報があります。必要に応じて活用してください。\n\n"
+                        f"{context_text}\n\n"
+                        f"---\n質問：{question}"
+                    )
+                else:
+                    user_content = f"質問：{question}"
+
+                yield f"data: {_json.dumps({'type': 'start', 'persona': persona_name}, ensure_ascii=False)}\n\n"
+
+                full_answer = ""
+                try:
+                    if ai_mode == "business":
+                        # ── Ollama: /api/chat でロール分離 ──
+                        payload = _json.dumps({
+                            "model": model,
+                            "messages": [
+                                {"role": "system", "content": system_content},
+                                {"role": "user",   "content": user_content},
+                            ],
+                            "stream": True,
+                            "options": {
+                                "temperature": 0.7,
+                                "num_predict": 1024,
+                                "num_ctx": 2048,
+                            },
+                        }).encode("utf-8")
+                        req = _ureq.Request(
+                            "http://127.0.0.1:11434/api/chat",
+                            data=payload,
+                            headers={"Content-Type": "application/json"},
+                            method="POST",
+                        )
+                        with _ureq.urlopen(req, timeout=60) as res:  # 1ペルソナ最大60秒
+                            for line in res:
+                                line = line.decode("utf-8").strip()
+                                if not line:
+                                    continue
+                                try:
+                                    obj   = _json.loads(line)
+                                    chunk = obj.get("message", {}).get("content", "")
+                                    if chunk:
+                                        full_answer += chunk
+                                        yield f"data: {_json.dumps({'type': 'chunk', 'persona': persona_name, 'chunk': chunk}, ensure_ascii=False)}\n\n"
+                                    if obj.get("done"):
+                                        break
+                                except Exception:
+                                    pass
+                    else:
+                        # ── Groq ──
+                        api_key = env.get("GROQ_API_KEY", "").strip()
+                        if not api_key:
+                            raise ValueError("Groq APIキーが未設定です")
+                        from groq import Groq
+                        client = Groq(api_key=api_key)
+                        stream = client.chat.completions.create(
+                            model="llama-3.3-70b-versatile",
+                            messages=[
+                                {"role": "system", "content": system_content},
+                                {"role": "user",   "content": user_content},
+                            ],
+                            max_tokens=400,
+                            stream=True,
+                        )
+                        for chunk_obj in stream:
+                            chunk = chunk_obj.choices[0].delta.content or ""
+                            if chunk:
+                                full_answer += chunk
+                                yield f"data: {_json.dumps({'type': 'chunk', 'persona': persona_name, 'chunk': chunk}, ensure_ascii=False)}\n\n"
+
+                except Exception as e:
+                    full_answer = f"（エラー: {str(e)}）"
+                    yield f"data: {_json.dumps({'type': 'chunk', 'persona': persona_name, 'chunk': full_answer}, ensure_ascii=False)}\n\n"
+
+                yield f"data: {_json.dumps({'type': 'done', 'persona': persona_name, 'answer': full_answer}, ensure_ascii=False)}\n\n"
+
+            yield f"data: {_json.dumps({'type': 'finished'}, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            yield f"data: {_json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.route("/api/council/save", methods=["POST"])
+def council_save():
+    """
+    相談結果を保存する。
+    Request JSON: {"question": str, "category_id": int, "final_decision": str,
+                   "adopted": [{"persona_name": str, "answer": str}, ...]}
+    """
+    data           = request.get_json(silent=True) or {}
+    question       = data.get("question", "").strip()
+    category_id    = int(data.get("category_id", 1) or 1)
+    final_decision = data.get("final_decision", "").strip()
+    adopted_list   = data.get("adopted", [])
+
+    if not question:
+        return jsonify({"status": "error", "message": "質問は必須です"}), 400
+
+    session_id = create_council_session(question, category_id, final_decision)
+    for a in adopted_list:
+        pname  = a.get("persona_name", "").strip()
+        answer = a.get("answer", "").strip()
+        if pname and answer:
+            create_council_adopted(session_id, pname, answer)
+
+    return jsonify({"status": "ok", "session_id": session_id}), 200
+
+
+@app.route("/api/council/sessions", methods=["GET"])
+def council_sessions_get():
+    """相談履歴を返す"""
+    category_id = request.args.get("category_id", type=int)
+    sessions    = get_council_sessions(category_id=category_id)
+    return jsonify(sessions), 200
 
 
 # ══════════════════════════════════════════════════

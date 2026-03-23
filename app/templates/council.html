@@ -1,33 +1,1215 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
   <title>COVE - 相談室</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="icon" type="image/x-icon" href="/static/aura.ico">
   <link rel="stylesheet" href="/static/css/style.css">
+  <style>
+    /* ─── レイアウト基盤 ─── */
+    .page-layout {
+      display: flex;
+      gap: 0;
+      min-height: calc(100vh - 56px);
+      padding-top: 56px;
+    }
+    .main-col {
+      flex: 1;
+      min-width: 0;
+      padding: 24px 28px 320px 28px;
+    }
+    /* ─── 右サイドパネル ─── */
+    .context-panel {
+      width: 260px;
+      flex-shrink: 0;
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      position: sticky;
+      top: 56px;
+      height: calc(100vh - 56px);
+      overflow-y: auto;
+      padding: 20px 16px;
+    }
+    .ctx-title {
+      font-size: 12px; font-weight: 600; color: var(--text);
+      margin-bottom: 14px; display: flex; align-items: center; gap: 6px;
+    }
+    .ctx-section { margin-bottom: 16px; }
+    .ctx-section-head {
+      font-size: 10px; font-weight: 600; color: var(--muted);
+      text-transform: uppercase; letter-spacing: .05em;
+      margin-bottom: 6px; padding-bottom: 4px;
+      border-bottom: 1px solid var(--border);
+    }
+    .ctx-item {
+      display: flex; align-items: flex-start; gap: 7px;
+      padding: 5px 4px; border-radius: 6px;
+      transition: background .15s; cursor: pointer;
+    }
+    .ctx-item:hover { background: var(--bg); }
+    .ctx-item-label {
+      flex: 1; font-size: 11px; color: var(--text); line-height: 1.4;
+      word-break: break-all;
+    }
+    .ctx-item-sub { font-size: 10px; color: var(--muted); margin-top: 1px; }
+    .ctx-toggle {
+      flex-shrink: 0; width: 32px; height: 18px;
+      background: var(--border); border-radius: 9px;
+      position: relative; cursor: pointer; transition: background .2s;
+      border: none; padding: 0;
+    }
+    .ctx-toggle.on  { background: #7C6AF7; }
+    .ctx-toggle::after {
+      content: ''; position: absolute; width: 12px; height: 12px;
+      background: #fff; border-radius: 50%; top: 3px; left: 3px;
+      transition: left .2s;
+    }
+    .ctx-toggle.on::after { left: 17px; }
+    .ctx-empty { font-size: 11px; color: var(--muted); padding: 4px; }
+
+    /* ─── 入力エリア ─── */
+    .council-input-section {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; padding: 18px 22px 16px; margin-bottom: 28px;
+    }
+    .council-input-row { display: flex; gap: 16px; align-items: flex-start; }
+    .council-input-main { flex: 1; }
+    .council-input-side { min-width: 170px; display: flex; flex-direction: column; gap: 8px; }
+    .c-label { font-size: 11px; color: var(--muted); margin-bottom: 4px; display: block; }
+    .c-select {
+      width: 100%; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 8px; padding: 7px 10px; font-size: 13px;
+      color: var(--text); cursor: pointer; font-family: inherit;
+    }
+    .c-textarea {
+      width: 100%; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 8px; padding: 10px 12px; font-size: 13px; color: var(--text);
+      resize: none; height: 84px; outline: none; font-family: inherit; line-height: 1.6;
+    }
+    .c-textarea:focus { border-color: #7C6AF7; }
+    .c-btn {
+      width: 100%; background: #7C6AF7; color: #fff; border: none;
+      border-radius: 8px; padding: 10px 0; font-size: 13px; font-weight: 600;
+      cursor: pointer; font-family: inherit; transition: opacity .2s; margin-top: auto;
+    }
+    .c-btn:hover { opacity: .88; } .c-btn:disabled { opacity: .4; cursor: default; }
+
+    /* ─── ペルソナエリア ─── */
+    .persona-stage { position: relative; width: 100%; margin-bottom: 28px; }
+
+    /* ペルソナカード：縦積み・枠を円形に */
+    .persona-card {
+      position: absolute;
+      background: var(--surface); border: 2px solid var(--border);
+      border-radius: 10px;
+      padding: 8px 6px 6px;
+      display: flex; flex-direction: column; align-items: center; gap: 4px;
+      text-align: center;
+      transition: border-color .4s, opacity .3s, transform .2s;
+      width: 170px !important; /* JS の CARD_W を上書き */
+    }
+    .persona-card:hover { transform: translateY(-2px); }
+    .persona-card.absent   { opacity: .38; filter: grayscale(.8); }
+    .persona-card.thinking { border-color: #FAC775; box-shadow: 0 0 0 3px #FAC77540; }
+    .persona-card.done     { border-color: #1D9E75; box-shadow: 0 0 0 3px #1D9E7530; }
+
+    /* 円形アバター */
+    .p-avatar {
+      width: 72px; height: 72px; border-radius: 50%; flex-shrink: 0;
+      position: relative; overflow: hidden;
+    }
+    .p-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .p-avatar svg { width: 100%; height: 100%; display: block; }
+
+    @keyframes sway { 0%,100%{transform:rotate(-4deg)} 50%{transform:rotate(4deg)} }
+    @keyframes db   { 0%,80%,100%{transform:translateY(0);opacity:.35} 40%{transform:translateY(-4px);opacity:1} }
+    .persona-card.thinking .p-avatar { animation: sway 1.8s ease-in-out infinite; }
+
+    .p-info { display: flex; flex-direction: column; gap: 2px; width: 100%; }
+    .p-name { font-size: 11px; font-weight: 600; color: var(--text); }
+    .p-role { font-size: 9px; color: var(--muted); line-height: 1.3; }
+    .p-status { font-size: 9px; display: flex; align-items: center; justify-content: center; gap: 3px; }
+    .p-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--border); flex-shrink: 0; }
+    .persona-card.thinking .p-dot { background: #FAC775; }
+    .persona-card.done     .p-dot { background: #1D9E75; }
+
+    .think-bubble {
+      display: none; position: absolute; top: -20px; left: 50%; transform: translateX(-50%);
+      background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+      padding: 1px 5px; font-size: 9px; color: var(--muted); white-space: nowrap; z-index: 20;
+    }
+    .persona-card.thinking .think-bubble { display: block; }
+    .dot { display:inline-block;width:3px;height:3px;border-radius:50%;background:currentColor;margin:0 1.5px;animation:db 1.1s infinite; }
+    .dot:nth-child(2){animation-delay:.18s} .dot:nth-child(3){animation-delay:.36s}
+
+    /* 入室/退室ボタン：カード下部 */
+    .presence-btn {
+      width: 80%; padding: 2px 0; border-radius: 8px;
+      font-size: 8px; font-weight: 500; cursor: pointer;
+      font-family: inherit; transition: all .15s; border: 1px solid;
+    }
+    .presence-btn.in  { background: transparent; border-color: var(--border); color: var(--muted); }
+    .presence-btn.in:hover { border-color: #E24B4A; color: #E24B4A; background: #FCEBEB; }
+    .presence-btn.out { background: #E1F5EE; border-color: #1D9E75; color: #0F6E56; font-weight: 600; }
+    .presence-btn.out:hover { background: #9FE1CB; }
+
+    /* アコーディオン（参照データパネル） */
+    .ctx-accordion { margin-bottom: 10px; }
+    .ctx-acc-head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 6px 4px; cursor: pointer; border-radius: 6px;
+      transition: background .15s; user-select: none;
+    }
+    .ctx-acc-head:hover { background: var(--bg); }
+    .ctx-acc-label {
+      font-size: 10px; font-weight: 600; color: var(--muted);
+      text-transform: uppercase; letter-spacing: .05em;
+    }
+    .ctx-acc-arrow {
+      font-size: 10px; color: var(--muted);
+      transition: transform .2s;
+    }
+    .ctx-acc-arrow.open { transform: rotate(180deg); }
+    .ctx-acc-body {
+      overflow: hidden; max-height: 0;
+      transition: max-height .25s ease;
+    }
+    .ctx-acc-body.open { max-height: 600px; }
+
+    /* ─── RPG回答パネル ─── */
+    .rpg-panel {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      height: 34vh; min-height: 230px; max-height: 340px;
+      background: var(--surface); border-top: 2px solid var(--border);
+      box-shadow: 0 -6px 32px rgba(0,0,0,.1);
+      z-index: 200; display: none; flex-direction: column;
+    }
+    .rpg-panel.visible { display: flex; }
+
+    .rpg-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+    }
+    .rpg-header-left { display: flex; align-items: center; gap: 10px; }
+    .rpg-persona-label { font-size: 13px; font-weight: 600; color: var(--text); }
+    .rpg-persona-role  { font-size: 11px; color: var(--muted); }
+    .rpg-nav { display: flex; align-items: center; gap: 8px; }
+    .rpg-nav-btn {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      padding: 5px 12px; font-size: 13px; cursor: pointer; color: var(--text);
+      transition: background .15s;
+    }
+    .rpg-nav-btn:hover:not(:disabled) { background: var(--border); }
+    .rpg-nav-btn:disabled { opacity: .3; cursor: default; }
+    .rpg-counter { font-size: 12px; color: var(--muted); min-width: 44px; text-align: center; }
+    .rpg-close-btn {
+      background: transparent; border: none; cursor: pointer;
+      font-size: 17px; color: var(--muted); padding: 2px 6px;
+    }
+    .rpg-close-btn:hover { color: var(--text); }
+
+    .rpg-body { display: flex; flex: 1; overflow: hidden; padding: 14px 20px; gap: 20px; align-items: stretch; }
+
+    .rpg-char { display: flex; flex-direction: column; align-items: center; gap: 8px; flex-shrink: 0; width: 100px; }
+    .rpg-char-face {
+      width: 90px; height: 90px; border-radius: 50%; overflow: hidden;
+      border: 2px solid var(--border); flex-shrink: 0; transition: border-color .3s;
+    }
+    .rpg-char-face svg { width: 100%; height: 100%; }
+    .rpg-char-face.thinking-face { border-color: #FAC775; }
+    .rpg-char-face.done-face     { border-color: #1D9E75; }
+    .rpg-adopt-btn {
+      width: 100%; padding: 5px 0; background: transparent;
+      border: 1px solid #1D9E75; color: #1D9E75; border-radius: 8px;
+      font-size: 10px; cursor: pointer; font-family: inherit; transition: background .15s;
+    }
+    .rpg-adopt-btn:hover { background: #E1F5EE; }
+    .rpg-adopt-btn.adopted { border-color: #EF9F27; color: #854F0B; background: #FAEEDA; cursor: default; }
+
+    .rpg-text-area {
+      flex: 1; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 12px; padding: 14px 18px; overflow-y: auto; position: relative;
+    }
+    .rpg-thinking-indicator { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+    .rpg-answer-text { font-size: 13px; color: var(--text); line-height: 1.8; white-space: pre-wrap; }
+
+    @keyframes blink-cursor { 0%,100%{opacity:1} 50%{opacity:0} }
+    .typing-cursor {
+      display: inline-block; width: 2px; height: 1em;
+      background: var(--text); vertical-align: text-bottom;
+      animation: blink-cursor .7s infinite; margin-left: 1px;
+    }
+
+    /* ─── 下段 ─── */
+    .council-bottom { display: flex; gap: 24px; align-items: flex-start; margin-top: 4px; }
+    .decision-section {
+      flex: 1; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; padding: 16px 20px;
+    }
+    .history-section {
+      flex: 1; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; padding: 16px 20px; max-height: 340px; overflow-y: auto;
+    }
+    .section-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 10px; }
+    .adopted-list  { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; min-height: 24px; }
+    .adopted-tag   { background: #FAEEDA; color: #854F0B; border: 1px solid #EF9F27; border-radius: 6px; padding: 3px 9px; font-size: 11px; }
+    .decision-textarea {
+      width: 100%; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 8px; padding: 9px 12px; font-size: 13px; color: var(--text);
+      resize: none; height: 72px; outline: none; font-family: inherit; line-height: 1.6;
+    }
+    .decision-textarea:focus { border-color: #7C6AF7; }
+    .save-decision-btn {
+      float: right; margin-top: 8px; background: transparent; border: 1px solid var(--border);
+      border-radius: 8px; padding: 6px 16px; font-size: 12px; cursor: pointer;
+      color: var(--text); font-family: inherit; transition: background .2s;
+    }
+    .save-decision-btn:hover { background: var(--bg); }
+    .history-item { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+    .history-item:last-child { border-bottom: none; }
+    .history-date { color: var(--muted); min-width: 64px; font-size: 10px; padding-top: 1px; white-space: nowrap; }
+    .history-body { flex: 1; }
+    .history-q    { font-weight: 600; color: var(--text); margin-bottom: 2px; }
+    .history-meta { font-size: 10px; color: var(--muted); }
+    .history-decision { font-size: 10px; color: var(--muted); margin-top: 2px; font-style: italic; }
+    .history-empty { color: var(--muted); font-size: 13px; text-align: center; padding: 20px 0; }
+  </style>
 </head>
 <body>
 
 <nav>
-  <span class="nav-logo"><img src="/static/aura_icon_256.png" style="width:24px;height:24px;vertical-align:middle;margin-right:8px;border-radius:4px;">AURA</span>
+  <span class="nav-logo">
+    <img src="/static/aura_icon_256.png" style="width:24px;height:24px;vertical-align:middle;margin-right:8px;border-radius:4px;">
+    COVE
+  </span>
   <div class="nav-links">
-    <a href="/" class="nav-link {% if active_page == 'index' %}active{% endif %}">🎙️ 録音</a>
-    <a href="/vault" class="nav-link {% if active_page == 'vault' %}active{% endif %}">🗄️ 保管庫</a>
-    <a href="/council" class="nav-link {% if active_page == 'council' %}active{% endif %}">💬 相談室</a>
-    <a href="/settings" class="nav-link {% if active_page == 'settings' %}active{% endif %}">⚙️ 設定</a>
-    <button class="nav-shutdown-btn" onclick="shutdownApp()" title="AURAを終了する">⏻ 終了</button>
+    <a href="/"        class="nav-link {% if active_page=='index'   %}active{% endif %}">🎙️ 録音</a>
+    <a href="/vault"   class="nav-link {% if active_page=='vault'   %}active{% endif %}">🗄️ 保管庫</a>
+    <a href="/council" class="nav-link {% if active_page=='council' %}active{% endif %}">💬 相談室</a>
+    <a href="/settings"class="nav-link {% if active_page=='settings'%}active{% endif %}">⚙️ 設定</a>
+    <button class="nav-shutdown-btn" onclick="shutdownApp()" title="終了">⏻ 終了</button>
   </div>
 </nav>
 
-<main style="max-width:720px; margin:60px auto; padding:0 24px; text-align:center;">
-  <div style="font-size:48px; margin-bottom:16px;">💬</div>
-  <h1 style="font-size:28px; margin-bottom:8px;">相談室</h1>
-  <p style="color:var(--muted); font-size:14px;">AIペルソナチームに相談して意思決定を支援する場所です。<br>現在実装中です。</p>
-</main>
+<div class="page-layout">
 
+  <!-- メインカラム -->
+  <div class="main-col">
+
+    <!-- ① 入力エリア -->
+    <div class="council-input-section">
+      <div class="council-input-row">
+        <div class="council-input-main">
+          <label class="c-label">相談内容</label>
+          <textarea class="c-textarea" id="councilQuestion"
+            placeholder="相談内容を入力してください…"></textarea>
+        </div>
+        <div class="council-input-side">
+          <div>
+            <label class="c-label">カテゴリ</label>
+            <select class="c-select" id="councilCategory" onchange="loadContextData()">
+              <option value="1">未分類</option>
+            </select>
+          </div>
+          <button class="c-btn" id="consultBtn" onclick="startConsult()">相談する →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ② ペルソナエリア -->
+    <div class="persona-stage" id="personaStage">
+      <div id="personaContainer" style="position:absolute;top:0;left:0;width:100%;pointer-events:none;"></div>
+    </div>
+
+    <!-- ③ 下段 -->
+    <div id="bottomArea">
+      <div class="council-bottom">
+        <div class="decision-section">
+          <div class="section-title">最終判断メモ</div>
+          <div class="adopted-list" id="adoptedList"></div>
+          <textarea class="decision-textarea" id="decisionText"
+            placeholder="採用した意見をもとに最終判断を記入…"></textarea>
+          <button class="save-decision-btn" onclick="saveSession()">保存する</button>
+          <div style="clear:both"></div>
+        </div>
+        <div class="history-section">
+          <div class="section-title">📋 相談履歴</div>
+          <div id="historyList"><div class="history-empty">まだ相談履歴がありません</div></div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /main-col -->
+
+  <!-- 右サイドパネル：参照データ -->
+  <div class="context-panel" id="contextPanel">
+    <div class="ctx-title">🗂 参照データ</div>
+    <div id="ctxContent"><div class="ctx-empty">カテゴリを選択してください</div></div>
+  </div>
+
+</div><!-- /page-layout -->
+
+<!-- RPG回答パネル -->
+<div class="rpg-panel" id="rpgPanel">
+  <div class="rpg-header">
+    <div class="rpg-header-left">
+      <div>
+        <div class="rpg-persona-label" id="rpgName">—</div>
+        <div class="rpg-persona-role"  id="rpgRole">—</div>
+      </div>
+    </div>
+    <div class="rpg-nav">
+      <button class="rpg-nav-btn" id="rpgPrev" onclick="rpgNav(-1)">◀</button>
+      <span class="rpg-counter" id="rpgCounter">- / -</span>
+      <button class="rpg-nav-btn" id="rpgNext" onclick="rpgNav(1)">▶</button>
+      <button class="rpg-close-btn" onclick="closeRpgPanel()" title="閉じる">✕</button>
+    </div>
+  </div>
+  <div class="rpg-body">
+    <div class="rpg-char">
+      <div class="rpg-char-face" id="rpgFace"></div>
+      <div id="rpgElapsed" style="font-size:11px;color:var(--muted);margin-top:4px;text-align:center;min-height:16px;"></div>
+      <button class="rpg-adopt-btn" id="rpgAdoptBtn" onclick="adoptCurrent()">採用する ✓</button>
+    </div>
+    <div class="rpg-text-area" id="rpgTextArea">
+      <div class="rpg-thinking-indicator" id="rpgThinking" style="display:none;">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <span style="margin-left:5px;">考えています…</span>
+      </div>
+      <div class="rpg-answer-text" id="rpgAnswerText"></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
 <script src="/static/js/recorder.js"></script>
+<script>
+// ══════════════════════════════════════════════════
+//  ペルソナ画像管理
+// ══════════════════════════════════════════════════
+// PNG画像があるペルソナはそちらを使い、なければSVGにフォールバック
+const PERSONA_IMG_MAP = {
+  '戦略家':       'strategist',
+  'リスク管理者': 'risk',
+  'アナリスト':   'analyst',
+  'クリエイター': 'creator',
+  '法務・コンプラ':'legal',
+  'ユーザー視点': 'user',
+  'クレーマー':   'complainer',
+  'マーケッター': 'marketer',
+};
+
+// 画像が存在するか確認済みのキャッシュ
+const imgExistsCache = {};
+
+function getPersonaImgState(state, thinkPhase) {
+  // state: 'wait' | 'think' | 'done'
+  // thinkPhase: 1 or 2 （think中の交互切替用）
+  if(state === 'think') return thinkPhase === 2 ? 'think2' : 'think1';
+  if(state === 'done')  return 'done';
+  return 'wait';
+}
+
+function drawPersonaFaceImg(name, imgState) {
+  const key = PERSONA_IMG_MAP[name];
+  if(!key) return null;
+  const src = `/static/img/personas/${key}_${imgState}.png`;
+  return `<img src="${src}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"
+    onerror="this.parentElement.innerHTML=drawPersonaFaceSVGFallback('${name}','${imgState}')" >`;
+}
+
+// think交互アニメーション管理
+const thinkTimers = {}; // name -> intervalId
+const thinkPhases = {}; // name -> 1 or 2
+
+function nameToKey(name) {
+  const p = PERSONA_DEFS.find(x => x.name === name);
+  return p ? p.key : name;
+}
+
+function startThinkAnimation(name) {
+  if(thinkTimers[name]) return;
+  thinkPhases[name] = 1;
+  thinkTimers[name] = setInterval(() => {
+    thinkPhases[name] = thinkPhases[name] === 1 ? 2 : 1;
+    const key = nameToKey(name);
+    const avatarEl = document.querySelector(`#pcard-${key} .p-avatar`);
+    if(avatarEl) {
+      const imgState = getPersonaImgState('think', thinkPhases[name]);
+      avatarEl.innerHTML = drawPersonaFaceImg(name, imgState) ||
+        `<svg viewBox="0 0 56 56">${drawPersonaFaceSVGInner(name,'think')}</svg>`;
+    }
+    if(rpgActiveList[rpgIndex] === name) {
+      const rpgFaceEl = document.getElementById('rpgFace');
+      if(rpgFaceEl) {
+        const imgState = getPersonaImgState('think', thinkPhases[name]);
+        rpgFaceEl.innerHTML = drawPersonaFaceImg(name, imgState) ||
+          `<svg viewBox="0 0 56 56">${drawPersonaFaceSVGInner(name,'think')}</svg>`;
+      }
+    }
+  }, 60000);
+}
+
+function stopThinkAnimation(name) {
+  if(thinkTimers[name]) {
+    clearInterval(thinkTimers[name]);
+    delete thinkTimers[name];
+    delete thinkPhases[name];
+  }
+}
+
+// ペルソナのstateが変わったときにアニメを制御
+function updateThinkAnimation(name, newState) {
+  if(newState === 'think') {
+    startThinkAnimation(name);
+  } else {
+    stopThinkAnimation(name);
+  }
+}
+
+// アバターHTMLを生成（カード・RPGパネル共通）
+function buildAvatarHtml(name, state) {
+  const phase = thinkPhases[name] || 1;
+  const imgState = getPersonaImgState(state, phase);
+  return drawPersonaFaceImg(name, imgState) ||
+    `<svg viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg"><defs></defs>${drawPersonaFaceSVGInner(name, state)}</svg>`;
+}
+
+// SVGフォールバック（画像がない場合）
+function drawPersonaFaceSVGFallback(name, imgState) {
+  const st = imgState.startsWith('think') ? 'think' : imgState;
+  return `<svg viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg"><defs></defs>${drawPersonaFaceSVGInner(name, st)}</svg>`;
+}
+
+// 旧SVG描画（フォールバック用・内部のみ）
+function drawPersonaFaceSVGInner(name, state) {
+  const st = state || 'wait';
+  const faces = {
+
+    // ── 戦略家：鋭い目・強い眉・口角引き締め・短髪オールバック ──
+    '戦略家': (s) => {
+      const brow = s==='think' ? 'M12 19 Q20 23 26 20 M30 20 Q36 23 44 19'
+                               : 'M12 18 Q20 21 26 19 M30 19 Q36 21 44 18';
+      const mouth = s==='done' ? 'M18 37 Q28 41 38 37' : 'M19 37 L37 37';
+      return `<circle cx="28" cy="28" r="27" fill="#EEEDFE"/>
+        <radialGradient id="sg0" cx="40%" cy="30%" r="60%"><stop offset="0%" stop-color="#fff" stop-opacity=".25"/><stop offset="100%" stop-color="#000" stop-opacity="0"/></radialGradient>
+        <circle cx="28" cy="28" r="27" fill="url(#sg0)"/>
+        <path d="M10 22 Q18 4 28 3 Q38 4 46 22 Q40 8 28 8 Q16 8 10 22Z" fill="#1a1a1a"/>
+        <ellipse cx="28" cy="31" rx="14" ry="17" fill="#F5D5A8"/>
+        <ellipse cx="13" cy="32" rx="3" ry="4" fill="#F5D5A8"/>
+        <ellipse cx="43" cy="32" rx="3" ry="4" fill="#F5D5A8"/>
+        <path d="${brow}" stroke="#1a1a1a" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+        <ellipse cx="20" cy="27" rx="4.5" ry="${s==='think'?2.5:4}" fill="white"/>
+        <circle cx="20" cy="${s==='think'?26.5:27}" r="3" fill="#2d2d7a"/>
+        <circle cx="21" cy="${s==='think'?25.5:26}" r="1" fill="white"/>
+        <ellipse cx="36" cy="27" rx="4.5" ry="${s==='think'?2.5:4}" fill="white"/>
+        <circle cx="36" cy="${s==='think'?26.5:27}" r="3" fill="#2d2d7a"/>
+        <circle cx="37" cy="${s==='think'?25.5:26}" r="1" fill="white"/>
+        <path d="M25 33 Q28 35 31 33" stroke="#c08060" stroke-width="1" fill="none"/>
+        <path d="${mouth}" stroke="#8B4040" stroke-width="2" fill="none" stroke-linecap="round"/>`;
+    },
+
+    // ── リスク管理者：眼鏡・心配顔・几帳面な髪型 ──
+    'リスク管理者': (s) => {
+      const brow = s==='think' ? 'M13 21 Q20 18 25 20 M31 20 Q36 18 43 21'
+                               : 'M13 22 Q20 19 25 21 M31 21 Q36 19 43 22';
+      const mouth = s==='done' ? 'M20 36 Q28 40 36 36' : s==='think' ? 'M20 37 Q28 34 36 37' : 'M21 37 Q28 34 35 37';
+      return `<circle cx="28" cy="28" r="27" fill="#E1F5EE"/>
+        <radialGradient id="sg1" cx="40%" cy="30%" r="60%"><stop offset="0%" stop-color="#fff" stop-opacity=".3"/><stop offset="100%" stop-color="#000" stop-opacity="0"/></radialGradient>
+        <circle cx="28" cy="28" r="27" fill="url(#sg1)"/>
+        <ellipse cx="28" cy="10" rx="16" ry="9" fill="#3d3d3d"/>
+        <rect x="12" y="16" width="32" height="5" rx="2" fill="#3d3d3d"/>
+        <ellipse cx="28" cy="31" rx="14" ry="17" fill="#F5D5A8"/>
+        <ellipse cx="13" cy="32" rx="3" ry="4" fill="#F5D5A8"/>
+        <ellipse cx="43" cy="32" rx="3" ry="4" fill="#F5D5A8"/>
+        <path d="${brow}" stroke="#3d3d3d" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+        <ellipse cx="20" cy="27" rx="5.5" ry="4.5" fill="white" stroke="#0F6E56" stroke-width="1"/>
+        <circle cx="20" cy="${s==='think'?25.5:27}" r="2.8" fill="#0F6E56"/>
+        <circle cx="21" cy="${s==='think'?24.5:26}" r=".9" fill="white"/>
+        <ellipse cx="36" cy="27" rx="5.5" ry="4.5" fill="white" stroke="#0F6E56" stroke-width="1"/>
+        <circle cx="36" cy="${s==='think'?25.5:27}" r="2.8" fill="#0F6E56"/>
+        <circle cx="37" cy="${s==='think'?24.5:26}" r=".9" fill="white"/>
+        <line x1="25.5" y1="27" x2="30.5" y2="27" stroke="#0F6E56" stroke-width="1"/>
+        <line x1="14" y1="25" x2="11.5" y2="23.5" stroke="#0F6E56" stroke-width="1"/>
+        <line x1="42" y1="25" x2="44.5" y2="23.5" stroke="#0F6E56" stroke-width="1"/>
+        <path d="M26 32 Q28 35 30 32" stroke="#c08060" stroke-width="1" fill="none"/>
+        <path d="${mouth}" stroke="#7a4040" stroke-width="1.8" fill="none" stroke-linecap="round"/>`;
+    },
+
+    // ── アナリスト：細い眼鏡・感情薄め・整った七三分け ──
+    'アナリスト': (s) => {
+      const brow = 'M14 21 Q20 21 25 21 M31 21 Q36 21 42 21';
+      const mouth = s==='done' ? 'M20 36 Q28 39 36 36' : 'M20 36 Q28 37 36 36';
+      return `<circle cx="28" cy="28" r="27" fill="#E6F1FB"/>
+        <radialGradient id="sg2" cx="40%" cy="30%" r="60%"><stop offset="0%" stop-color="#fff" stop-opacity=".3"/><stop offset="100%" stop-color="#000" stop-opacity="0"/></radialGradient>
+        <circle cx="28" cy="28" r="27" fill="url(#sg2)"/>
+        <path d="M13 22 Q15 5 28 4 Q41 5 43 20 L42 22 Q36 7 28 7 Q20 7 13 22Z" fill="#5a5a5a"/>
+        <ellipse cx="28" cy="31" rx="14" ry="17" fill="#FDDBB8"/>
+        <ellipse cx="13" cy="32" rx="3" ry="4" fill="#FDDBB8"/>
+        <ellipse cx="43" cy="32" rx="3" ry="4" fill="#FDDBB8"/>
+        <path d="${brow}" stroke="#5a5a5a" stroke-width="1.6" fill="none"/>
+        <rect x="14" y="24" width="11" height="7" rx="3.5" fill="white" stroke="#185FA5" stroke-width="1"/>
+        <rect x="31" y="24" width="11" height="7" rx="3.5" fill="white" stroke="#185FA5" stroke-width="1"/>
+        <circle cx="19.5" cy="${s==='think'?26.5:27.5}" r="2.6" fill="#185FA5"/>
+        <circle cx="20.3" cy="${s==='think'?25.5:26.5}" r=".85" fill="white"/>
+        <circle cx="36.5" cy="${s==='think'?26.5:27.5}" r="2.6" fill="#185FA5"/>
+        <circle cx="37.3" cy="${s==='think'?25.5:26.5}" r=".85" fill="white"/>
+        <line x1="25" y1="27.5" x2="31" y2="27.5" stroke="#185FA5" stroke-width=".9"/>
+        <line x1="14" y1="27.5" x2="11.5" y2="27" stroke="#185FA5" stroke-width=".9"/>
+        <line x1="42" y1="27.5" x2="44.5" y2="27" stroke="#185FA5" stroke-width=".9"/>
+        <path d="M26 33 Q28 35 30 33" stroke="#C8906A" stroke-width="1" fill="none"/>
+        <path d="${mouth}" stroke="#8B5050" stroke-width="1.6" fill="none" stroke-linecap="round"/>`;
+    },
+
+    // ── クリエイター：カラフルな跳ね髪・大きな目・笑顔 ──
+    'クリエイター': (s) => {
+      const brow = s==='think' ? 'M13 20 Q19 16 25 18 M31 18 Q37 16 43 20'
+                               : 'M13 20 Q19 17 25 19 M31 19 Q37 17 43 20';
+      const mouth = s==='done' ? 'M17 34 Q28 42 39 34' : s==='think' ? 'M19 35 Q28 39 37 35' : 'M18 34 Q28 41 38 34';
+      return `<circle cx="28" cy="28" r="27" fill="#FAECE7"/>
+        <radialGradient id="sg3" cx="40%" cy="30%" r="60%"><stop offset="0%" stop-color="#fff" stop-opacity=".3"/><stop offset="100%" stop-color="#000" stop-opacity="0"/></radialGradient>
+        <circle cx="28" cy="28" r="27" fill="url(#sg3)"/>
+        <path d="M13 22 Q10 9 18 5 Q28 1 38 5 Q46 9 43 22 Q38 10 28 9 Q18 10 13 22Z" fill="#993C1D"/>
+        <path d="M9 18 Q7 8 13 6" stroke="#993C1D" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+        <path d="M45 16 Q48 7 43 5" stroke="#993C1D" stroke-width="3" fill="none" stroke-linecap="round"/>
+        <path d="M22 3 Q24 -1 27 2" stroke="#993C1D" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+        <ellipse cx="28" cy="31" rx="14" ry="17" fill="#FDDBB8"/>
+        <ellipse cx="13" cy="32" rx="3" ry="4" fill="#FDDBB8"/>
+        <ellipse cx="43" cy="32" rx="3" ry="4" fill="#FDDBB8"/>
+        <path d="${brow}" stroke="#993C1D" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+        <ellipse cx="20" cy="27" rx="4.5" ry="5.2" fill="white"/>
+        <circle cx="20" cy="${s==='think'?25:27}" r="3.2" fill="#993C1D"/>
+        <circle cx="21.2" cy="${s==='think'?24:26}" r="1.1" fill="white"/>
+        <ellipse cx="36" cy="27" rx="4.5" ry="5.2" fill="white"/>
+        <circle cx="36" cy="${s==='think'?25:27}" r="3.2" fill="#993C1D"/>
+        <circle cx="37.2" cy="${s==='think'?24:26}" r="1.1" fill="white"/>
+        <path d="M26 33 Q28 35.5 30 33" stroke="#C8906A" stroke-width="1" fill="none"/>
+        <path d="${mouth}" stroke="#B06040" stroke-width="2" fill="none" stroke-linecap="round"/>`;
+    },
+
+    // ── 法務・コンプラ：厳格顔・一直線の口・きっちりした髪 ──
+    '法務・コンプラ': (s) => {
+      const brow = s==='think' ? 'M13 20 Q20 22 25 20 M31 20 Q36 22 43 20'
+                               : 'M13 20 Q20 20 25 20 M31 20 Q36 20 43 20';
+      const mouth = s==='done' ? 'M19 36 Q28 39 37 36' : 'M18 36 L38 36';
+      return `<circle cx="28" cy="28" r="27" fill="#F1EFE8"/>
+        <radialGradient id="sg4" cx="40%" cy="30%" r="60%"><stop offset="0%" stop-color="#fff" stop-opacity=".25"/><stop offset="100%" stop-color="#000" stop-opacity="0"/></radialGradient>
+        <circle cx="28" cy="28" r="27" fill="url(#sg4)"/>
+        <path d="M12 22 Q14 4 28 3 Q42 4 44 22 Q38 8 28 8 Q18 8 12 22Z" fill="#1a1a1a"/>
+        <rect x="12" y="17" width="32" height="6" rx="0" fill="#1a1a1a"/>
+        <ellipse cx="28" cy="31" rx="14" ry="17" fill="#F5D5A8"/>
+        <ellipse cx="13" cy="32" rx="3" ry="4" fill="#F5D5A8"/>
+        <ellipse cx="43" cy="32" rx="3" ry="4" fill="#F5D5A8"/>
+        <path d="${brow}" stroke="#1a1a1a" stroke-width="2.4" fill="none" stroke-linecap="square"/>
+        <ellipse cx="20" cy="27" rx="4" ry="${s==='think'?2.5:3.5}" fill="white"/>
+        <circle cx="20" cy="${s==='think'?25.5:27}" r="2.8" fill="#333"/>
+        <circle cx="21" cy="${s==='think'?24.5:26}" r=".9" fill="white"/>
+        <ellipse cx="36" cy="27" rx="4" ry="${s==='think'?2.5:3.5}" fill="white"/>
+        <circle cx="36" cy="${s==='think'?25.5:27}" r="2.8" fill="#333"/>
+        <circle cx="37" cy="${s==='think'?24.5:26}" r=".9" fill="white"/>
+        <path d="M26 33 Q28 35 30 33" stroke="#C8906A" stroke-width="1" fill="none"/>
+        <path d="${mouth}" stroke="#6a3030" stroke-width="2.2" fill="none" stroke-linecap="square"/>`;
+    },
+
+    // ── ユーザー視点：丸顔・穏やかな目・親しみやすい笑顔 ──
+    'ユーザー視点': (s) => {
+      const brow = s==='think' ? 'M14 22 Q20 19 25 21 M31 21 Q36 19 42 22'
+                               : 'M14 22 Q20 19 25 21 M31 21 Q36 19 42 22';
+      const mouth = s==='done' ? 'M17 34 Q28 42 39 34' : s==='think' ? 'M20 37 Q28 34 36 37' : 'M18 34 Q28 40 38 34';
+      return `<circle cx="28" cy="28" r="27" fill="#EAF3DE"/>
+        <radialGradient id="sg5" cx="40%" cy="30%" r="60%"><stop offset="0%" stop-color="#fff" stop-opacity=".3"/><stop offset="100%" stop-color="#000" stop-opacity="0"/></radialGradient>
+        <circle cx="28" cy="28" r="27" fill="url(#sg5)"/>
+        <ellipse cx="28" cy="12" rx="17" ry="11" fill="#854F0B"/>
+        <ellipse cx="12" cy="17" rx="4" ry="5" fill="#854F0B"/>
+        <ellipse cx="44" cy="17" rx="4" ry="5" fill="#854F0B"/>
+        <ellipse cx="28" cy="31" rx="14" ry="17" fill="#FDDBB8"/>
+        <ellipse cx="13" cy="32" rx="3.5" ry="4.5" fill="#FDDBB8"/>
+        <ellipse cx="43" cy="32" rx="3.5" ry="4.5" fill="#FDDBB8"/>
+        <path d="${brow}" stroke="#854F0B" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+        <ellipse cx="20" cy="27" rx="4.5" ry="5" fill="white"/>
+        <circle cx="20" cy="${s==='think'?25:27}" r="3" fill="#3B6D11"/>
+        <circle cx="21" cy="${s==='think'?24:26}" r="1" fill="white"/>
+        <ellipse cx="36" cy="27" rx="4.5" ry="5" fill="white"/>
+        <circle cx="36" cy="${s==='think'?25:27}" r="3" fill="#3B6D11"/>
+        <circle cx="37" cy="${s==='think'?24:26}" r="1" fill="white"/>
+        <circle cx="20" cy="33" r="2" fill="#F5A070" opacity=".5"/>
+        <circle cx="36" cy="33" r="2" fill="#F5A070" opacity=".5"/>
+        <path d="M26 33 Q28 35.5 30 33" stroke="#C8906A" stroke-width="1" fill="none"/>
+        <path d="${mouth}" stroke="#B06040" stroke-width="2" fill="none" stroke-linecap="round"/>`;
+    },
+
+    // ── クレーマー：への字眉・への字口・乱れた髪・険しい目 ──
+    'クレーマー': (s) => {
+      const brow = s==='think' ? 'M12 18 Q20 23 26 19 M30 19 Q36 23 44 18'
+                               : 'M12 19 Q20 24 26 20 M30 20 Q36 24 44 19';
+      const mouth = 'M18 38 Q28 32 38 38';
+      return `<circle cx="28" cy="28" r="27" fill="#FCEBEB"/>
+        <radialGradient id="sg6" cx="40%" cy="30%" r="60%"><stop offset="0%" stop-color="#fff" stop-opacity=".2"/><stop offset="100%" stop-color="#000" stop-opacity="0"/></radialGradient>
+        <circle cx="28" cy="28" r="27" fill="url(#sg6)"/>
+        <path d="M12 22 Q10 8 19 5 Q28 2 37 5 Q46 8 44 22" fill="#791F1F"/>
+        <path d="M11 14 Q8 5 15 3" stroke="#791F1F" stroke-width="4.5" fill="none" stroke-linecap="round"/>
+        <path d="M45 14 Q48 6 41 3" stroke="#791F1F" stroke-width="4" fill="none" stroke-linecap="round"/>
+        <path d="M26 2 Q28 -1 32 2" stroke="#791F1F" stroke-width="3" fill="none" stroke-linecap="round"/>
+        <ellipse cx="28" cy="31" rx="14" ry="17" fill="#FDDBB8"/>
+        <ellipse cx="13" cy="32" rx="3" ry="4" fill="#FDDBB8"/>
+        <ellipse cx="43" cy="32" rx="3" ry="4" fill="#FDDBB8"/>
+        <path d="${brow}" stroke="#791F1F" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+        <ellipse cx="20" cy="27" rx="4.2" ry="${s==='think'?2.2:3.2}" fill="white"/>
+        <circle cx="20" cy="${s==='think'?25.5:27}" r="3" fill="#A32D2D"/>
+        <circle cx="21" cy="${s==='think'?24.5:26}" r=".9" fill="white"/>
+        <ellipse cx="36" cy="27" rx="4.2" ry="${s==='think'?2.2:3.2}" fill="white"/>
+        <circle cx="36" cy="${s==='think'?25.5:27}" r="3" fill="#A32D2D"/>
+        <circle cx="37" cy="${s==='think'?24.5:26}" r=".9" fill="white"/>
+        <path d="M26 33 Q28 35 30 33" stroke="#C8906A" stroke-width="1" fill="none"/>
+        <path d="${mouth}" stroke="#8B2020" stroke-width="2.2" fill="none" stroke-linecap="round"/>`;
+    },
+
+    // ── マーケッター：スタイリッシュな髪・自信の表情・アクティブな目 ──
+    'マーケッター': (s) => {
+      const brow = s==='think' ? 'M13 20 Q19 17 25 19 M31 19 Q37 17 43 20'
+                               : 'M13 20 Q19 17 25 19 M31 19 Q37 17 43 20';
+      const mouth = s==='done' ? 'M17 34 Q28 42 39 34' : s==='think' ? 'M20 36 Q24 39 30 37' : 'M18 34 Q28 40 38 34';
+      return `<circle cx="28" cy="28" r="27" fill="#FAEEDA"/>
+        <radialGradient id="sg7" cx="40%" cy="30%" r="60%"><stop offset="0%" stop-color="#fff" stop-opacity=".3"/><stop offset="100%" stop-color="#000" stop-opacity="0"/></radialGradient>
+        <circle cx="28" cy="28" r="27" fill="url(#sg7)"/>
+        <path d="M13 22 Q11 7 24 3 Q33 1 41 6 Q48 10 44 22 Q41 9 33 8 Q22 8 13 22Z" fill="#412402"/>
+        <path d="M12 16 Q10 8 15 5" stroke="#412402" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+        <ellipse cx="28" cy="31" rx="14" ry="17" fill="#FDDBB8"/>
+        <ellipse cx="13" cy="32" rx="3" ry="4" fill="#FDDBB8"/>
+        <ellipse cx="43" cy="32" rx="3" ry="4" fill="#FDDBB8"/>
+        <path d="${brow}" stroke="#412402" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+        <ellipse cx="20" cy="27" rx="4.2" ry="${s==='think'?3:4.2}" fill="white"/>
+        <circle cx="20" cy="${s==='think'?25.5:27}" r="2.9" fill="#BA7517"/>
+        <circle cx="21" cy="${s==='think'?24.5:26}" r="1" fill="white"/>
+        <ellipse cx="36" cy="27" rx="4.2" ry="${s==='think'?3:4.2}" fill="white"/>
+        <circle cx="36" cy="${s==='think'?25.5:27}" r="2.9" fill="#BA7517"/>
+        <circle cx="37" cy="${s==='think'?24.5:26}" r="1" fill="white"/>
+        <path d="M26 33 Q28 35.5 30 33" stroke="#C8906A" stroke-width="1" fill="none"/>
+        <path d="${mouth}" stroke="#B06040" stroke-width="2" fill="none" stroke-linecap="round"/>`;
+    },
+  };
+
+  const fn = faces[name];
+  if(!fn) return `<circle cx="28" cy="28" r="27" fill="#ccc"/>`;
+  return fn(st);
+}
+
+// 外部から呼ぶ統合関数（後方互換）
+function drawPersonaFace(name, state) {
+  return buildAvatarHtml(name, state);
+}
+
+// ══════════════════════════════════════════════════
+//  ペルソナ定義
+// ══════════════════════════════════════════════════
+const PERSONA_DEFS = [
+  { name:'戦略家',       key:'strategist',  role:'攻撃的・勝ちにいく'    },
+  { name:'リスク管理者', key:'risk',         role:'保守的・問題指摘'       },
+  { name:'アナリスト',   key:'analyst',      role:'データ・客観的分析'     },
+  { name:'クリエイター', key:'creator',      role:'発想力・斬新アイデア'   },
+  { name:'法務・コンプラ',key:'legal',       role:'規則・法的観点'         },
+  { name:'ユーザー視点', key:'user',         role:'現場・顧客目線'         },
+  { name:'クレーマー',   key:'complainer',   role:'批判・欠点指摘'         },
+  { name:'マーケッター', key:'marketer',     role:'市場・ブランド戦略'     },
+];
+
+// 千鳥配置オフセット [x補正px, y補正px]
+// 1段目(i=0-3)と2段目(i=4-7)で半列分ずらし、さらに個別に微調整
+const LAYOUT_OFFSETS = [
+  [  0,   0],   // 戦略家      1段目
+  [  0,  20],   // リスク管理者 1段目
+  [  0,   5],   // アナリスト   1段目
+  [  0,  15],   // クリエイター 1段目
+  [  0,   8],   // 法務・コンプラ 2段目（半列右にずれる）
+  [  0,  25],   // ユーザー視点 2段目
+  [  0,   0],   // クレーマー   2段目
+  [  0,  18],   // マーケッター 2段目
+];
+
+let personaStates  = {};
+let personaAnswers = {};
+let personaPresent = {};
+let adoptedPersonas = [];
+let currentSessionId = null;
+let rpgIndex = 0;
+let rpgActiveList = [];
+let typingTimer = null;
+const shownAnswers = {};
+
+// 経過時間管理
+const personaStartTimes = {};  // name -> Date（思考開始時刻）
+const personaElapsed   = {};   // name -> 秒数（完了時に確定）
+let elapsedTimer = null;       // 表示更新タイマー
+
+function startElapsedTimer(name) {
+  personaStartTimes[name] = new Date();
+}
+
+function stopElapsedTimer(name) {
+  if(personaStartTimes[name]) {
+    const secs = Math.round((new Date() - personaStartTimes[name]) / 1000);
+    personaElapsed[name] = secs;
+  }
+}
+
+function getElapsedText(name, state) {
+  if(state === 'done' && personaElapsed[name] !== undefined) {
+    return `${personaElapsed[name]}秒`;
+  }
+  if(state === 'think' && personaStartTimes[name]) {
+    const secs = Math.round((new Date() - personaStartTimes[name]) / 1000);
+    return `${secs}秒…`;
+  }
+  return '';
+}
+
+function updateElapsedDisplay() {
+  const name  = rpgActiveList[rpgIndex];
+  const state = personaStates[name] || 'wait';
+  const el    = document.getElementById('rpgElapsed');
+  if(el) el.textContent = getElapsedText(name, state);
+}
+
+// ══════════════════════════════════════════════════
+//  ペルソナエリア描画
+// ══════════════════════════════════════════════════
+function renderPersonaStage() {
+  const stage = document.getElementById('personaStage');
+  const pCont = document.getElementById('personaContainer');
+  const W     = stage.offsetWidth || 900;
+  const n     = PERSONA_DEFS.length; // 8人
+  const cols  = 4;
+
+  const CARD_W = 170;
+  const CARD_H = 200; // 高さ目安
+  // 横：8人を4列として、全幅を均等割り（オフセット分の余白を考慮）
+  const colSpan = Math.floor(W / cols); // 1列あたりの幅
+  // 縦：行間を詰める（オフセット最大35px + カード高さ + 余白）
+  const ROW_H  = CARD_H + 20;
+
+  pCont.innerHTML = '';
+  let maxBottom = 0;
+
+  PERSONA_DEFS.forEach((p, i) => {
+    const present = personaPresent[p.name] !== false;
+    const state   = personaStates[p.name] || 'wait';
+    const st      = present ? state : 'absent';
+
+    const col   = i % cols;
+    const row   = Math.floor(i / cols);
+    const [ox, oy] = LAYOUT_OFFSETS[i] || [0, 0];
+
+    // 千鳥：2段目は半列分右にずらす
+    const stagger = row % 2 === 1 ? colSpan / 2 : 0;
+    const baseCX  = colSpan * col + colSpan / 2 + stagger;
+    // 全体を左寄せ：戦略家(col=0,row=0)のleftが0になるよう調整
+    const leftOffset = -(colSpan / 2 - CARD_W / 2);
+    const cardX   = Math.round(baseCX - CARD_W / 2 + ox + leftOffset);
+    const cardY   = row * ROW_H + oy + 28;
+
+    const statusTxt    = !present ? '退出中' : st==='wait'?'待機中':st==='think'?'考え中…':'回答完了';
+    const presenceClass = present ? 'in' : 'out';
+    const presenceTxt   = present ? '退出する' : '入室する';
+
+    if(st === 'think') startThinkAnimation(p.name);
+    else               stopThinkAnimation(p.name);
+
+    const div = document.createElement('div');
+    div.id = `pcard-${p.key}`;
+    div.className = `persona-card ${st}`;
+    div.style.cssText = `left:${cardX}px;top:${cardY}px;width:${CARD_W}px;pointer-events:auto;`;
+    div.innerHTML = `
+      <div style="position:relative;">
+        ${st==='think'?`<div class="think-bubble"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>`:''}
+        <div class="p-avatar">${buildAvatarHtml(p.name, st==='absent'?'wait':st)}</div>
+      </div>
+      <div class="p-info">
+        <div class="p-name">${p.name}</div>
+        <div class="p-role">${p.role}</div>
+        <div class="p-status"><span class="p-dot"></span><span>${statusTxt}</span></div>
+      </div>
+      <button class="presence-btn ${presenceClass}" onclick="togglePresence('${p.name}')">${presenceTxt}</button>`;
+    pCont.appendChild(div);
+
+    const bottom = cardY + CARD_H + 10;
+    if(bottom > maxBottom) maxBottom = bottom;
+  });
+
+  stage.style.height = (maxBottom + 16) + 'px';
+}
+
+function togglePresence(name) {
+  personaPresent[name] = !personaPresent[name];
+  renderPersonaStage();
+}
+
+// ══════════════════════════════════════════════════
+//  参照データサイドパネル
+// ══════════════════════════════════════════════════
+let contextEnabled = {}; // key -> bool
+
+async function loadContextData() {
+  const catId = parseInt(document.getElementById('councilCategory').value) || 1;
+  const content = document.getElementById('ctxContent');
+  content.innerHTML = '<div class="ctx-empty">読み込み中…</div>';
+
+  try {
+    const [recs, memos, files] = await Promise.all([
+      fetch(`/api/recordings?category_id=${catId}`).then(r=>r.json()).catch(()=>[]),
+      fetch(`/api/vault/memos?category_id=${catId}`).then(r=>r.json()).catch(()=>[]),
+      fetch(`/api/vault/files?category_id=${catId}`).then(r=>r.json()).catch(()=>[]),
+    ]);
+
+    const sections = [
+      { icon:'🎙', label:'録音', items: recs.filter(r=>r.ai_summary).map(r=>({ key:`rec_${r.id}`,  title:r.title||'無題',        sub:r.created_at?r.created_at.slice(0,10):'',  preview:r.ai_summary })) },
+      { icon:'📝', label:'メモ', items: memos.map(m=>({                       key:`memo_${m.id}`, title:m.title||'無題',        sub:'',                                         preview:m.body })) },
+      { icon:'📁', label:'ファイル', items: files.filter(f=>f.summary).map(f=>({ key:`file_${f.id}`,title:f.original_name||'無題',sub:f.filetype||'',                           preview:f.summary })) },
+    ];
+
+    let html = '';
+    sections.forEach(sec => {
+      if(!sec.items.length) return;
+      html += `<div class="ctx-accordion">
+        <div class="ctx-acc-head" onclick="toggleAccordion(this)">
+          <span class="ctx-acc-label">${sec.icon} ${sec.label}（${sec.items.length}件）</span>
+          <span class="ctx-acc-arrow open">▲</span>
+        </div>
+        <div class="ctx-acc-body open">`;
+      sec.items.forEach(item => {
+        if(contextEnabled[item.key] === undefined) contextEnabled[item.key] = true;
+        const on = contextEnabled[item.key] !== false;
+        html += `<div class="ctx-item">
+          <div style="flex:1;min-width:0;">
+            <div class="ctx-item-label">${item.title}</div>
+            ${item.sub ? `<div class="ctx-item-sub">${item.sub}</div>` : ''}
+            <div class="ctx-item-preview" id="preview-${item.key}" style="display:none;font-size:10px;color:var(--muted);margin-top:4px;line-height:1.5;max-height:80px;overflow-y:auto;white-space:pre-wrap;">${(item.preview||'').slice(0,300)}${(item.preview||'').length>300?'…':''}</div>
+            <button onclick="togglePreview('${item.key}')" style="background:none;border:none;font-size:10px;color:var(--muted);cursor:pointer;padding:2px 0;margin-top:2px;" id="preview-btn-${item.key}">▶ 内容を見る</button>
+          </div>
+          <button class="ctx-toggle ${on?'on':''}" id="ctx-${item.key}"
+            onclick="toggleContext('${item.key}')" title="${on?'除外する':'含める'}"></button>
+        </div>`;
+      });
+      html += `</div></div>`;
+    });
+
+    if(!html) html = '<div class="ctx-empty">このカテゴリにはデータがありません</div>';
+    content.innerHTML = html;
+
+  } catch(e) {
+    content.innerHTML = '<div class="ctx-empty">読み込みエラー</div>';
+  }
+}
+
+function toggleAccordion(headEl) {
+  const body  = headEl.nextElementSibling;
+  const arrow = headEl.querySelector('.ctx-acc-arrow');
+  const open  = body.classList.toggle('open');
+  if(arrow) arrow.classList.toggle('open', open);
+}
+
+function togglePreview(key) {
+  const el  = document.getElementById(`preview-${key}`);
+  const btn = document.getElementById(`preview-btn-${key}`);
+  if(!el) return;
+  const showing = el.style.display !== 'none';
+  el.style.display = showing ? 'none' : 'block';
+  if(btn) btn.textContent = showing ? '▶ 内容を見る' : '▲ 閉じる';
+}
+
+function toggleContext(key) {
+  contextEnabled[key] = !contextEnabled[key];
+  const btn = document.getElementById(`ctx-${key}`);
+  if(btn) btn.className = `ctx-toggle ${contextEnabled[key]?'on':''}`;
+}
+
+function getEnabledContextKeys() {
+  return Object.entries(contextEnabled).filter(([k,v])=>v).map(([k])=>k);
+}
+
+// ══════════════════════════════════════════════════
+//  RPGパネル
+// ══════════════════════════════════════════════════
+function openRpgPanel() {
+  document.getElementById('rpgPanel').classList.add('visible');
+  document.getElementById('bottomArea').style.display = 'none';
+}
+function closeRpgPanel() {
+  document.getElementById('rpgPanel').classList.remove('visible');
+  document.getElementById('bottomArea').style.display = '';
+}
+
+function rpgNav(dir) {
+  const newIdx = rpgIndex + dir;
+  if(newIdx < 0 || newIdx >= rpgActiveList.length) return;
+  rpgIndex = newIdx;
+  rpgShowCurrent();
+}
+
+function rpgShowCurrent() {
+  const name  = rpgActiveList[rpgIndex];
+  const p     = PERSONA_DEFS.find(x => x.name === name);
+  const state = personaStates[name] || 'wait';
+  const ans   = personaAnswers[name] || '';
+
+  document.getElementById('rpgCounter').textContent = `${rpgIndex+1} / ${rpgActiveList.length}`;
+  document.getElementById('rpgPrev').disabled = rpgIndex === 0;
+  document.getElementById('rpgNext').disabled = rpgIndex === rpgActiveList.length-1;
+  document.getElementById('rpgName').textContent = p ? p.name : '—';
+  document.getElementById('rpgRole').textContent = p ? p.role : '';
+  updateElapsedDisplay();
+
+  const faceEl = document.getElementById('rpgFace');
+  faceEl.innerHTML = buildAvatarHtml(name, state);
+  faceEl.className = `rpg-char-face ${state==='think'?'thinking-face':state==='done'?'done-face':''}`;
+
+  const adoptBtn = document.getElementById('rpgAdoptBtn');
+  const isAdopted = adoptedPersonas.some(a => a.name === name);
+  if(state !== 'done' || !ans) {
+    adoptBtn.style.display = 'none';
+  } else {
+    adoptBtn.style.display = '';
+    adoptBtn.className = `rpg-adopt-btn${isAdopted?' adopted':''}`;
+    adoptBtn.textContent = isAdopted ? '採用済み ★' : '採用する ✓';
+    adoptBtn.disabled = isAdopted;
+  }
+
+  const thinkEl = document.getElementById('rpgThinking');
+  const textEl  = document.getElementById('rpgAnswerText');
+
+  if(state === 'think') {
+    thinkEl.style.display = 'flex';
+    textEl.innerHTML = '';
+  } else if(state === 'done' && ans) {
+    thinkEl.style.display = 'none';
+    // ★ 修正：一度表示済みの回答はそのまま。未表示のみタイプライター
+    if(shownAnswers[name] === ans) {
+      // 既に表示済み → そのまま維持（何もしない。textElはすでに内容がある）
+      if(!textEl.textContent || textEl.dataset.persona !== name) {
+        textEl.textContent = ans;
+        textEl.dataset.persona = name;
+      }
+    } else {
+      // 初めて表示 → タイプライターで表示し、完了後に記録
+      textEl.dataset.persona = name;
+      typeText(textEl, ans, () => { shownAnswers[name] = ans; });
+    }
+  } else {
+    thinkEl.style.display = 'none';
+    textEl.textContent = '考え中…';
+    textEl.dataset.persona = '';
+  }
+}
+
+function typeText(el, text, onDone) {
+  if(typingTimer) { clearInterval(typingTimer); typingTimer = null; }
+  el.textContent = '';
+  const cursor = document.createElement('span');
+  cursor.className = 'typing-cursor';
+  el.appendChild(cursor);
+  let i = 0;
+  typingTimer = setInterval(() => {
+    if(i >= text.length) {
+      clearInterval(typingTimer); typingTimer = null;
+      cursor.remove();
+      el.textContent = text;
+      if(onDone) onDone();
+      return;
+    }
+    el.insertBefore(document.createTextNode(text[i]), cursor);
+    i++;
+    el.parentElement.scrollTop = el.parentElement.scrollHeight;
+  }, 16);
+}
+
+function adoptCurrent() {
+  const name = rpgActiveList[rpgIndex];
+  const ans  = personaAnswers[name] || '';
+  if(!ans || adoptedPersonas.some(a => a.name === name)) return;
+  adoptedPersonas.push({ name, answer: ans });
+  updateAdoptedList();
+  rpgShowCurrent();
+  renderPersonaStage();
+  showToast(`${name} の回答を採用しました`);
+}
+
+function updateAdoptedList() {
+  document.getElementById('adoptedList').innerHTML =
+    adoptedPersonas.map(a => `<span class="adopted-tag">${a.name}</span>`).join('');
+}
+
+// ══════════════════════════════════════════════════
+//  相談開始
+// ══════════════════════════════════════════════════
+function startConsult() {
+  const question = document.getElementById('councilQuestion').value.trim();
+  if(!question) { showToast('相談内容を入力してください', true); return; }
+
+  const categoryId = parseInt(document.getElementById('councilCategory').value) || 1;
+  rpgActiveList = PERSONA_DEFS.filter(p => personaPresent[p.name] !== false).map(p => p.name);
+  if(!rpgActiveList.length) { showToast('入室中のペルソナがいません', true); return; }
+
+  PERSONA_DEFS.forEach(p => { personaStates[p.name]='wait'; personaAnswers[p.name]=''; });
+  Object.keys(shownAnswers).forEach(k => delete shownAnswers[k]);
+  Object.keys(personaStartTimes).forEach(k => delete personaStartTimes[k]);
+  Object.keys(personaElapsed).forEach(k => delete personaElapsed[k]);
+  if(elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+  adoptedPersonas = [];
+  currentSessionId = null;
+  document.getElementById('decisionText').value = '';
+  updateAdoptedList();
+  rpgIndex = 0;
+
+  // 入室中のペルソナは全員いっせいに「考え中」にする
+  rpgActiveList.forEach(name => { personaStates[name] = 'think'; });
+
+  openRpgPanel();
+  renderPersonaStage();
+  rpgShowCurrent();
+
+  // 経過時間を1秒ごとに更新
+  elapsedTimer = setInterval(updateElapsedDisplay, 1000);
+
+  const btn = document.getElementById('consultBtn');
+  btn.disabled = true;
+
+  const enabledKeys = getEnabledContextKeys();
+
+  fetch('/api/council/ask', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question, category_id: categoryId, personas: rpgActiveList, context_keys: enabledKeys }),
+  }).then(res => {
+    const reader = res.body.getReader(), dec = new TextDecoder();
+    let buf = '';
+    function pump() {
+      reader.read().then(({ done, value }) => {
+        if(done) { btn.disabled = false; return; }
+        buf += dec.decode(value, { stream: true });
+        const parts = buf.split('\n\n');
+        buf = parts.pop();
+        parts.forEach(part => {
+          const line = part.trim();
+          if(!line.startsWith('data:')) return;
+          try { handleSSE(JSON.parse(line.slice(5).trim())); } catch(e) {}
+        });
+        pump();
+      });
+    }
+    pump();
+  }).catch(() => {
+    btn.disabled = false;
+    showToast('通信エラーが発生しました', true);
+  });
+}
+
+function handleSSE(obj) {
+  switch(obj.type) {
+    case 'start':
+      personaStates[obj.persona] = 'think';
+      startElapsedTimer(obj.persona);
+      renderPersonaStage();
+      if(rpgActiveList[rpgIndex] === obj.persona) rpgShowCurrent();
+      break;
+    case 'chunk':
+      personaAnswers[obj.persona] = (personaAnswers[obj.persona]||'') + obj.chunk;
+      if(rpgActiveList[rpgIndex] === obj.persona) {
+        // ストリーミング中：リアルタイムにテキストを流す
+        const textEl = document.getElementById('rpgAnswerText');
+        if(typingTimer) { clearInterval(typingTimer); typingTimer = null; }
+        textEl.textContent = personaAnswers[obj.persona];
+        textEl.dataset.persona = obj.persona;
+        document.getElementById('rpgThinking').style.display = 'none';
+        document.getElementById('rpgFace').className = 'rpg-char-face thinking-face';
+        textEl.parentElement.scrollTop = textEl.parentElement.scrollHeight;
+      }
+      break;
+    case 'done':
+      stopElapsedTimer(obj.persona);
+      personaStates[obj.persona] = 'done';
+      personaAnswers[obj.persona] = obj.answer;
+      shownAnswers[obj.persona] = obj.answer; // ストリーミング済みなので表示完了扱い
+      renderPersonaStage();
+      if(rpgActiveList[rpgIndex] === obj.persona) rpgShowCurrent();
+      updateElapsedDisplay();
+      break;
+    case 'finished':
+      if(elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+      document.getElementById('consultBtn').disabled = false;
+      showToast('全員の回答が完了しました');
+      break;
+    case 'error':
+      showToast('エラー: ' + obj.message, true);
+      document.getElementById('consultBtn').disabled = false;
+      break;
+  }
+}
+
+// ══════════════════════════════════════════════════
+//  保存・履歴・カテゴリ・設定
+// ══════════════════════════════════════════════════
+async function saveSession() {
+  const question = document.getElementById('councilQuestion').value.trim();
+  const catId    = parseInt(document.getElementById('councilCategory').value) || 1;
+  const decision = document.getElementById('decisionText').value.trim();
+  if(!question) { showToast('相談内容がありません', true); return; }
+  try {
+    const data = await (await fetch('/api/council/save', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ question, category_id:catId, final_decision:decision, adopted:adoptedPersonas }),
+    })).json();
+    if(data.status==='ok') { currentSessionId=data.session_id; showToast('保存しました'); loadHistory(); }
+    else showToast('保存に失敗しました', true);
+  } catch(e) { showToast('通信エラー', true); }
+}
+
+async function loadHistory() {
+  try {
+    const sessions = await (await fetch('/api/council/sessions')).json();
+    const list = document.getElementById('historyList');
+    if(!sessions.length) { list.innerHTML='<div class="history-empty">まだ相談履歴がありません</div>'; return; }
+    list.innerHTML = sessions.map(s => {
+      const dt      = s.created_at ? s.created_at.slice(0,16) : '';
+      const adopted = s.adopted&&s.adopted.length ? s.adopted.map(a=>a.persona_name).join('・') : 'なし';
+      return `<div class="history-item">
+        <div class="history-date">${dt}</div>
+        <div class="history-body">
+          <div class="history-q">${s.question}</div>
+          <div class="history-meta">採用：${adopted}</div>
+          ${s.final_decision?`<div class="history-decision">→ ${s.final_decision}</div>`:''}
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) {}
+}
+
+async function loadCategories() {
+  try {
+    const cats = await (await fetch('/api/categories')).json();
+    document.getElementById('councilCategory').innerHTML =
+      cats.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+  } catch(e) {}
+}
+
+async function loadPersonaSettings() {
+  try {
+    const data = await (await fetch('/api/personas')).json();
+    data.forEach(p => { personaPresent[p.persona_name] = p.enabled === 1; });
+  } catch(e) {
+    PERSONA_DEFS.forEach(p => { personaPresent[p.name] = true; });
+  }
+  renderPersonaStage();
+}
+
+window.addEventListener('load', async () => {
+  await loadCategories();
+  await loadPersonaSettings();
+  await loadHistory();
+  await loadContextData();
+});
+window.addEventListener('resize', renderPersonaStage);
+</script>
 </body>
 </html>
