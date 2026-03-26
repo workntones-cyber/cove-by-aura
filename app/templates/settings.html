@@ -3,22 +3,31 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AURA - 設定</title>
+  <title>COVE - 設定</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="icon" type="image/x-icon" href="/static/aura.ico">
+  <link rel="icon" type="image/x-icon" href="/static/cove.ico">
   <link rel="stylesheet" href="/static/css/style.css">
+  <style>
+    .debug-toggle { position:relative; display:inline-block; width:44px; height:24px; flex-shrink:0; }
+    .debug-toggle input { opacity:0; width:0; height:0; }
+    .debug-slider { position:absolute; cursor:pointer; inset:0; background:#2a2a3e; border-radius:24px; transition:.3s; }
+    .debug-slider:before { content:""; position:absolute; width:18px; height:18px; left:3px; bottom:3px; background:#888; border-radius:50%; transition:.3s; }
+    .debug-toggle input:checked + .debug-slider { background:rgba(29,158,117,0.3); border:1px solid #1D9E75; }
+    .debug-toggle input:checked + .debug-slider:before { transform:translateX(20px); background:#1D9E75; }
+  </style>
 </head>
 <body>
 
 <nav>
-  <span class="nav-logo"><img src="/static/aura_icon_256.png" style="width:24px;height:24px;vertical-align:middle;margin-right:8px;border-radius:4px;">AURA</span>
+  <span class="nav-logo">COVE</span>
   <div class="nav-links">
     <a href="/" class="nav-link {% if active_page == 'index' %}active{% endif %}">🎙️ 録音</a>
     <a href="/vault" class="nav-link {% if active_page == 'vault' %}active{% endif %}">🗄️ 保管庫</a>
     <a href="/council" class="nav-link {% if active_page == 'council' %}active{% endif %}">💬 相談室</a>
     <a href="/settings" class="nav-link {% if active_page == 'settings' %}active{% endif %}">⚙️ 設定</a>
-    <button class="nav-shutdown-btn" onclick="shutdownApp()" title="AURAを終了する">⏻ 終了</button>
+    <a href="/help" target="_blank" class="nav-link" title="取扱説明書" style="font-size:18px;padding:4px 8px;">❓</a>
+    <button class="nav-shutdown-btn" onclick="shutdownApp()" title="COVEを終了する">⏻ 終了</button>
   </div>
 </nav>
 
@@ -185,7 +194,7 @@
                 <div class="mac-step-title">システム設定でサウンド出力を切り替え</div>
                 <div class="mac-step-desc">
                   「システム設定」→「サウンド」→ 出力を「複数出力装置」に変更。<br>
-                  これでスピーカーから音を聞きながらAURAで録音できます。<br>
+                  これでスピーカーから音を聞きながらCOVEで録音できます。<br>
                   <span style="color:#FBBF24;">⚠️ 注意：この設定後はキーボードでの音量調整が効かなくなります。<br>音量をすぐ調整できるよう、事前に以下の設定をおすすめします：<br>「システム設定」→「コントロールセンター」→「サウンド」→「メニューバーに表示：常に表示」<br>これで画面右上の🔊アイコンから直接音量調整できます。</span>
                 </div>
                 <label class="mac-step-check-label">
@@ -198,7 +207,7 @@
             <div class="mac-step" id="macStep5">
               <div class="mac-step-num" id="macStepNum5">5</div>
               <div class="mac-step-body">
-                <div class="mac-step-title">AURAを再起動して完了</div>
+                <div class="mac-step-title">COVEを再起動して完了</div>
                 <div class="mac-step-desc">再起動後、BlackHoleが自動で検出されます。</div>
                 <label class="mac-step-check-label">
                   <input type="checkbox" id="checkStep5" onchange="saveMacStepCheck(5, this.checked)">
@@ -242,23 +251,114 @@
     <div class="settings-section-title">🎭 ペルソナ管理</div>
     <div class="settings-card" style="padding: 20px;">
       <p style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.6;">
-        相談室に参加させるペルソナをON/OFFで管理します。<br>
-        OFFにしたペルソナは相談室に表示されますが、デフォルトで退出状態になります。
+        相談室に参加させるペルソナを自由に追加・編集・削除できます。<br>
+        OFFにしたペルソナは相談室でデフォルト退出状態になります。
       </p>
-      <div id="personaList" style="display:flex;flex-direction:column;gap:10px;"></div>
+      <div id="personaList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;"></div>
+      <button onclick="openPersonaModal(null)"
+        style="width:100%;padding:10px;border-radius:8px;border:2px dashed var(--border);
+               background:transparent;color:var(--muted);cursor:pointer;font-size:13px;
+               font-family:inherit;transition:all .2s;"
+        onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'"
+        onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">
+        ＋ 新しいペルソナを追加
+      </button>
+    </div>
+  </div>
+
+  <!-- ペルソナ編集モーダル -->
+  <div id="personaModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);
+       z-index:9999;align-items:center;justify-content:center;backdrop-filter:blur(4px);">
+    <div style="background:#1e1e2e;border:1px solid #444;border-radius:16px;padding:28px;width:90%;max-width:520px;
+                box-shadow:0 24px 80px rgba(0,0,0,.8);position:relative;z-index:10000;color:#e0e0e0;">
+      <div style="font-size:16px;font-weight:700;margin-bottom:20px;color:#fff;" id="personaModalTitle">ペルソナを追加</div>
+
+      <!-- アイコンアップロード -->
+      <div style="margin-bottom:16px;">
+        <div style="font-size:11px;color:#aaa;margin-bottom:8px;">アイコン画像（PNG・JPG・WebP・GIF・2MB以内・推奨256×256px）</div>
+        <div style="display:flex;gap:16px;">
+          <!-- 待機中アイコン -->
+          <div style="flex:1;text-align:center;">
+            <div style="font-size:10px;color:#888;margin-bottom:6px;">待機中</div>
+            <div id="pIconWaitPreview" style="width:72px;height:72px;border-radius:50%;overflow:hidden;border:2px solid #555;background:#444;margin:0 auto 6px;display:flex;align-items:center;justify-content:center;">
+              <svg viewBox="0 0 56 56" width="72" height="72"><circle cx="28" cy="28" r="28" fill="#c0c0c0"/><circle cx="28" cy="20" r="10" fill="#707070"/><ellipse cx="28" cy="46" rx="16" ry="12" fill="#707070"/></svg>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px;align-items:center;">
+              <label style="padding:4px 10px;border-radius:6px;border:1px solid #7C6AF7;color:#7C6AF7;font-size:11px;cursor:pointer;">
+                📷 選択
+                <input type="file" id="pIconWaitFile" accept=".png,.jpg,.jpeg,.webp,.gif" style="display:none;" onchange="previewModalIcon('wait',this)">
+              </label>
+              <button id="pIconWaitDelBtn" onclick="clearModalIcon('wait')" style="display:none;padding:4px 10px;border-radius:6px;border:1px solid #dc3545;color:#dc3545;font-size:11px;cursor:pointer;background:transparent;font-family:inherit;">🗑️ 削除</button>
+            </div>
+          </div>
+          <!-- 考え中アイコン -->
+          <div style="flex:1;text-align:center;">
+            <div style="font-size:10px;color:#888;margin-bottom:6px;">考え中（任意）</div>
+            <div id="pIconThinkPreview" style="width:72px;height:72px;border-radius:50%;overflow:hidden;border:2px dashed #555;background:#333;margin:0 auto 6px;display:flex;align-items:center;justify-content:center;">
+              <svg viewBox="0 0 56 56" width="72" height="72"><circle cx="28" cy="28" r="28" fill="#888"/><circle cx="28" cy="20" r="10" fill="#555"/><ellipse cx="28" cy="46" rx="16" ry="12" fill="#555"/></svg>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px;align-items:center;">
+              <label style="padding:4px 10px;border-radius:6px;border:1px solid #7C6AF7;color:#7C6AF7;font-size:11px;cursor:pointer;">
+                📷 選択
+                <input type="file" id="pIconThinkFile" accept=".png,.jpg,.jpeg,.webp,.gif" style="display:none;" onchange="previewModalIcon('think',this)">
+              </label>
+              <button id="pIconThinkDelBtn" onclick="clearModalIcon('think')" style="display:none;padding:4px 10px;border-radius:6px;border:1px solid #dc3545;color:#dc3545;font-size:11px;cursor:pointer;background:transparent;font-family:inherit;">🗑️ 削除</button>
+            </div>
+          </div>
+        </div>
+        <div style="font-size:10px;color:#555;margin-top:6px;text-align:center;">考え中を未設定の場合は待機中の画像を代用します</div>
+      </div>
+
+      <div style="margin-bottom:12px;">
+        <label style="font-size:11px;color:#aaa;display:block;margin-bottom:4px;">名前 *</label>
+        <input id="pName" type="text" placeholder="例：財務アドバイザー" maxlength="30"
+               style="width:100%;padding:8px 12px;font-size:13px;background:#2a2a3e;border:1px solid #555;
+                      border-radius:8px;color:#e0e0e0;font-family:inherit;box-sizing:border-box;outline:none;"/>
+      </div>
+      <div style="margin-bottom:12px;">
+        <label style="font-size:11px;color:#aaa;display:block;margin-bottom:4px;">役割（一言説明）</label>
+        <input id="pRole" type="text" placeholder="例：財務・コスト最適化" maxlength="30"
+               style="width:100%;padding:8px 12px;font-size:13px;background:#2a2a3e;border:1px solid #555;
+                      border-radius:8px;color:#e0e0e0;font-family:inherit;box-sizing:border-box;outline:none;"/>
+      </div>
+      <div style="margin-bottom:12px;">
+        <label style="font-size:11px;color:#aaa;display:block;margin-bottom:4px;">人物像・回答スタイル（システムプロンプト）</label>
+        <textarea id="pPrompt" rows="6"
+          placeholder="例：あなたは財務の専門家です。コスト削減・投資対効果・キャッシュフローの観点から意見を述べてください。"
+          style="width:100%;padding:8px 12px;font-size:12px;line-height:1.6;resize:vertical;font-family:inherit;
+                 background:#2a2a3e;border:1px solid #555;border-radius:8px;color:#e0e0e0;
+                 box-sizing:border-box;outline:none;"></textarea>
+        <div style="font-size:10px;color:#888;margin-top:4px;">このテキストがAIへの指示になります。どんな専門家として回答させたいか自由に書いてください。</div>
+      </div>
+      <div style="margin-bottom:20px;display:flex;align-items:center;gap:8px;">
+        <input type="checkbox" id="pEnabled" checked style="width:16px;height:16px;cursor:pointer;accent-color:#7C6AF7;"/>
+        <label for="pEnabled" style="font-size:13px;cursor:pointer;color:#e0e0e0;">相談室でON（有効）</label>
+      </div>
+
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button onclick="closePersonaModal()"
+          style="padding:8px 20px;border-radius:8px;border:1px solid #555;
+                 background:#2a2a3e;color:#ccc;cursor:pointer;font-family:inherit;font-size:13px;">
+          キャンセル
+        </button>
+        <button onclick="savePersona()"
+          style="padding:8px 20px;border-radius:8px;border:none;
+                 background:#7C6AF7;color:#fff;cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;">
+          💾 保存
+        </button>
+      </div>
     </div>
   </div>
 
   <!-- データ管理 -->
   <div class="settings-section" style="margin-top: 40px;">
-    <div class="settings-section-title">🗄️ データ管理</div>
-    <div class="settings-card" style="padding: 20px;">
+    <div class="settings-section-title" style="color:#dc3545;">⚠️ デンジャーゾーン</div>
+    <div class="settings-card" style="padding: 20px; border: 2px solid #dc3545; border-radius: 12px; background: rgba(220,53,69,0.05);">
 
       <!-- 注意書き -->
       <div class="danger-notice">
         ⚠️ <strong>注意：この操作は取り消せません</strong><br>
-        すべての録音データ（タイトル・メモ・文字起こし・要約・音声ファイル）が完全に削除されます。
-        削除前に必要なデータをエクスポートしてください。
+        削除したデータは復元できません。必要なデータは事前にメモ等に控えてください。
       </div>
 
       <!-- カテゴリごとの削除 -->
@@ -269,13 +369,13 @@
           </select>
           <button class="danger-btn" onclick="confirmDeleteByCategory()" style="white-space:nowrap;">🗑️ 削除</button>
         </div>
-        <div style="font-size:11px; color:var(--muted); margin-top:4px;">選択したカテゴリの録音データをすべて削除します</div>
+        <div style="font-size:11px; color:var(--muted); margin-top:4px;">選択したカテゴリの録音・メモ・ファイル・Webデータをすべて削除します</div>
       </div>
 
       <div style="display:flex; align-items:center; justify-content:space-between; margin-top: 16px;">
         <div>
-          <div style="font-size:14px; font-weight:600; margin-bottom:4px;">すべての録音データを削除</div>
-          <div style="font-size:12px; color:var(--muted);">DBとすべての音声ファイルを削除します</div>
+          <div style="font-size:14px; font-weight:600; margin-bottom:4px;">すべてのデータを削除</div>
+          <div style="font-size:12px; color:var(--muted);">録音・メモ・ファイル・Webデータ・相談履歴をすべて削除します<br>カテゴリ・ペルソナ設定は維持されます</div>
         </div>
         <button class="danger-btn" onclick="confirmDeleteAll()">🗑️ 全削除</button>
       </div>
@@ -289,8 +389,9 @@
       <div class="modal-icon">🗑️</div>
       <div class="modal-title">本当に削除しますか？</div>
       <div class="modal-desc">
-        すべての録音データと音声ファイルが<br>
-        <strong>完全に削除されます。</strong><br>
+        録音・メモ・ファイル・Webデータ・相談履歴が<br>
+        <strong>すべて完全に削除されます。</strong><br>
+        カテゴリ・ペルソナ設定は維持されます。<br>
         この操作は取り消せません。
       </div>
       <div class="modal-actions">
@@ -300,10 +401,95 @@
     </div>
   </div>
 
+  <!-- 動作検証 -->
+  <div class="settings-section" style="margin-top:40px;margin-bottom:40px;">
+    <div class="settings-section-title" style="color:#1D9E75;">🧪 動作検証</div>
+    <div class="settings-card" style="padding:20px;border:2px solid #1D9E75;border-radius:12px;background:rgba(29,158,117,0.05);">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:16px;">
+        各エラーの挙動をON/OFFで疑似的に確認できます。ONにした状態で該当操作を実行すると、エラー時の画面表示を確認できます。<br>
+        <strong style="color:#1D9E75;">検証後は必ずOFFに戻してください。</strong>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:12px;">
+
+        <!-- Ollama切断 -->
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:12px;background:var(--bg);border-radius:8px;border:1px solid var(--border);">
+          <div>
+            <div style="font-size:13px;font-weight:600;">🔌 Ollama切断</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:2px;">相談室で相談ボタンを押すとOllama切断エラーが発生します</div>
+          </div>
+          <label class="debug-toggle">
+            <input type="checkbox" id="debug-ollama" onchange="setDebugFlag('ollama_disconnect', this.checked)">
+            <span class="debug-slider"></span>
+          </label>
+        </div>
+
+        <!-- メモリ不足 -->
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:12px;background:var(--bg);border-radius:8px;border:1px solid var(--border);">
+          <div>
+            <div style="font-size:13px;font-weight:600;">💾 メモリ不足</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:2px;">相談室で相談ボタンを押すとメモリ不足エラーが発生します</div>
+          </div>
+          <label class="debug-toggle">
+            <input type="checkbox" id="debug-memory" onchange="setDebugFlag('memory_error', this.checked)">
+            <span class="debug-slider"></span>
+          </label>
+        </div>
+
+        <!-- ディスク不足 -->
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:12px;background:var(--bg);border-radius:8px;border:1px solid var(--border);">
+          <div>
+            <div style="font-size:13px;font-weight:600;">💿 ディスク不足</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:2px;">録音画面で録音停止後にディスク不足エラーが発生します</div>
+          </div>
+          <label class="debug-toggle">
+            <input type="checkbox" id="debug-disk" onchange="setDebugFlag('disk_error', this.checked)">
+            <span class="debug-slider"></span>
+          </label>
+        </div>
+
+        <!-- モデル未インストール -->
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:12px;background:var(--bg);border-radius:8px;border:1px solid var(--border);">
+          <div>
+            <div style="font-size:13px;font-weight:600;">🤖 モデル未インストール</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:2px;">相談室で相談ボタン、または録音画面で文字起こしを実行するとエラーが発生します</div>
+          </div>
+          <label class="debug-toggle">
+            <input type="checkbox" id="debug-model" onchange="setDebugFlag('model_not_found', this.checked)">
+            <span class="debug-slider"></span>
+          </label>
+        </div>
+
+        <!-- ffmpeg未インストール -->
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:12px;background:var(--bg);border-radius:8px;border:1px solid var(--border);">
+          <div>
+            <div style="font-size:13px;font-weight:600;">🎬 ffmpeg未インストール</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:2px;">録音画面でトリミングボタンを押すとエラーが発生します</div>
+          </div>
+          <label class="debug-toggle">
+            <input type="checkbox" id="debug-ffmpeg" onchange="setDebugFlag('ffmpeg_not_found', this.checked)">
+            <span class="debug-slider"></span>
+          </label>
+        </div>
+
+      </div>
+
+      <button onclick="resetAllDebugFlags()" style="margin-top:16px;padding:8px 16px;border-radius:6px;border:1px solid #1D9E75;background:transparent;color:#1D9E75;cursor:pointer;font-size:12px;font-family:inherit;">
+        🔄 すべてOFFにリセット
+      </button>
+    </div>
+  </div>
+
 </main>
 
 <div class="toast" id="toast"></div>
 
 <script src="/static/js/settings.js"></script>
+<script>
+// ページ離脱時にOllama処理を中断（シャットダウンはしない）
+window.addEventListener('pagehide', () => {
+  navigator.sendBeacon('/api/ollama/abort', JSON.stringify({}));
+});
+</script>
 </body>
 </html>

@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════════
-   AURA - settings.js
+   COVE - settings.js
    設定画面の制御（settings.html 専用）
    ══════════════════════════════════════════════════ */
 
@@ -42,7 +42,7 @@ function renderCategoryList() {
   el.innerHTML = _categories.map(cat => `
     <div style="display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid var(--border);">
       <span style="width:16px;height:16px;border-radius:50%;background:${cat.color};flex-shrink:0;"></span>
-      ${cat.id === 1
+      ${cat.id === 1 || cat.name === '利用者情報'
         ? `<span style="flex:1; font-size:13px; color:var(--muted);">${escHtml(cat.name)}（削除不可）</span>`
         : `<input class="api-key-input" value="${escHtml(cat.name)}" id="cat-name-${cat.id}"
             style="flex:1; padding:4px 8px; font-size:13px;" maxlength="20" />
@@ -137,12 +137,12 @@ async function confirmDeleteByCategory() {
   const id  = parseInt(sel.value);
   const cat = _categories.find(c => c.id === id);
   if (!cat) return;
-  if (!confirm(`カテゴリ「${cat.name}」の録音データをすべて削除しますか？\nこの操作は取り消せません。`)) return;
+  if (!confirm(`カテゴリ「${cat.name}」の録音・メモ・ファイル・Webデータをすべて削除しますか？\nこの操作は取り消せません。`)) return;
 
-  const res  = await fetch(`/api/categories/${id}/recordings`, { method: 'DELETE' });
+  const res  = await fetch(`/api/categories/${id}/data`, { method: 'DELETE' });
   const data = await res.json();
   if (data.status === 'ok') {
-    showToast(`✅ ${data.deleted}件の録音データを削除しました`);
+    showToast(`✅ ${data.deleted}件のデータを削除しました`);
   } else {
     showToast('❌ ' + (data.message || 'エラーが発生しました'));
   }
@@ -529,7 +529,7 @@ function checkAllStepsDone() {
 
 // ── アプリ終了 ────────────────────────────────────
 async function shutdownApp() {
-  if (!confirm('AURAを終了しますか？')) return;
+  if (!confirm('COVEを終了しますか？')) return;
   try {
     await fetch('/api/shutdown', { method: 'POST' });
   } catch (e) {
@@ -538,7 +538,7 @@ async function shutdownApp() {
   window.close();
   // window.closeが効かないブラウザ向けのフォールバック
   setTimeout(() => {
-    document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:Arial;color:#888;font-size:18px;">AURAを終了しました。このタブを閉じてください。</div>';
+    document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:Arial;color:#888;font-size:18px;">COVEを終了しました。このタブを閉じてください。</div>';
   }, 500);
 }
 
@@ -546,59 +546,303 @@ async function shutdownApp() {
 //  ペルソナ管理
 // ══════════════════════════════════════════════════
 
+// ══════════════════════════════════════════════════
+//  ペルソナ管理（CRUD）
+// ══════════════════════════════════════════════════
+let _personas = [];
+let _editingPersonaName = null; // null=新規, string=編集中の元の名前
+
+// ── デフォルトアイコンマップ（council.htmlと同期） ──
+const PERSONA_IMG_MAP = {
+  '戦略家':       'strategist',
+  'リスク管理者': 'risk',
+  'アナリスト':   'analyst',
+  'クリエイター': 'creator',
+  '法務・コンプラ':'legal',
+  'ユーザー視点': 'user',
+  'クレーマー':   'complainer',
+  'マーケッター': 'marketer',
+};
+
 async function loadPersonas() {
   const list = document.getElementById('personaList');
-  if (!list) return;
+  if(!list) return;
   try {
-    const res  = await fetch('/api/personas');
-    const data = await res.json();
+    const res = await fetch('/api/personas');
+    _personas = await res.json();
     list.innerHTML = '';
-    data.forEach(p => {
+    _personas.forEach(p => {
       const row = document.createElement('div');
-      row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--bg2);border-radius:8px;';
+      row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg2);border-radius:10px;border:1px solid var(--border);';
+
+      const iconKey    = btoa(unescape(encodeURIComponent(p.persona_name))).replace(/=/g,'');
+      const defaultKey = PERSONA_IMG_MAP[p.persona_name];
+      const defaultSrc = defaultKey ? `/static/img/personas/${defaultKey}_wait.png` : null;
+      const silhouetteSvg = `<svg viewBox="0 0 56 56" width="44" height="44"><circle cx="28" cy="28" r="28" fill="#9CA3AF"/><circle cx="28" cy="20" r="10" fill="#4B5563"/><ellipse cx="28" cy="46" rx="16" ry="12" fill="#4B5563"/></svg>`;
+      const iconDivStyle = `width:44px;height:44px;border-radius:50%;border:2px solid var(--border);flex-shrink:0;overflow:hidden;background:#9CA3AF center/cover no-repeat;`;
+
       row.innerHTML = `
-        <div>
-          <div style="font-size:14px;font-weight:500;">${p.persona_name}</div>
-        </div>
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-          <span style="font-size:12px;color:var(--muted);">${p.enabled ? 'ON' : 'OFF'}</span>
-          <div class="toggle-wrap" style="position:relative;width:40px;height:22px;">
-            <input type="checkbox" ${p.enabled ? 'checked' : ''}
-              onchange="togglePersona('${p.persona_name}', this)"
-              style="opacity:0;position:absolute;width:100%;height:100%;cursor:pointer;margin:0;z-index:1;">
-            <div class="toggle-track" style="position:absolute;inset:0;background:${p.enabled ? '#7C6AF7' : 'var(--border)'};border-radius:11px;transition:background .2s;"></div>
-            <div class="toggle-thumb" style="position:absolute;top:3px;left:${p.enabled ? '21px' : '3px'};width:16px;height:16px;background:#fff;border-radius:50%;transition:left .2s;"></div>
+        <div style="flex-shrink:0;">
+          <div id="icon-preview-${iconKey}" onclick="openPersonaModal('${escHtml(p.persona_name)}')"
+            title="クリックして編集"
+            style="${iconDivStyle}${defaultSrc ? `background-image:url('${defaultSrc}');` : ''}cursor:pointer;transition:opacity .2s;"
+            onmouseover="this.style.opacity='.75'" onmouseout="this.style.opacity='1'">
+            ${defaultSrc ? '' : silhouetteSvg}
           </div>
-        </label>`;
+        </div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;font-weight:600;color:var(--text);">${escHtml(p.persona_name)}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px;">${escHtml(p.role||'役割未設定')}</div>
+        </div>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;flex-shrink:0;">
+          <span style="font-size:11px;color:var(--muted);" id="ptag-${escHtml(p.persona_name)}">${p.enabled ? 'ON' : 'OFF'}</span>
+          <div style="position:relative;width:36px;height:20px;">
+            <input type="checkbox" ${p.enabled ? 'checked' : ''}
+              onchange="togglePersonaEnabled('${escHtml(p.persona_name)}', this)"
+              style="opacity:0;position:absolute;width:100%;height:100%;cursor:pointer;margin:0;z-index:1;">
+            <div style="position:absolute;inset:0;background:${p.enabled ? '#7C6AF7' : 'var(--border)'};border-radius:10px;transition:background .2s;" class="ptoggle-track"></div>
+            <div style="position:absolute;top:2px;left:${p.enabled ? '18px' : '2px'};width:16px;height:16px;background:#fff;border-radius:50%;transition:left .2s;" class="ptoggle-thumb"></div>
+          </div>
+        </label>
+        <button onclick="openPersonaModal('${escHtml(p.persona_name)}')"
+          style="padding:4px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;
+                 color:var(--text);cursor:pointer;font-size:11px;font-family:inherit;flex-shrink:0;">✏️ 編集</button>
+        <button onclick="deletePersona('${escHtml(p.persona_name)}')"
+          style="padding:4px 10px;border-radius:6px;border:1px solid #dc3545;background:transparent;
+                 color:#dc3545;cursor:pointer;font-size:11px;font-family:inherit;flex-shrink:0;">🗑️</button>`;
       list.appendChild(row);
+
+      // カスタムアイコンがあれば上書き
+      fetch(`/api/personas/${encodeURIComponent(p.persona_name)}/icon`)
+        .then(r => r.json())
+        .then(data => {
+          const url = data.wait || data.think;
+          if(url) {
+            const el = document.getElementById(`icon-preview-${iconKey}`);
+            if(el) {
+              el.style.backgroundImage = `url('${url}?t=${Date.now()}')`;
+              el.innerHTML = '';
+            }
+          }
+        }).catch(()=>{});
     });
   } catch(e) {
     console.error('ペルソナ読み込みエラー:', e);
   }
 }
 
-async function togglePersona(name, checkbox) {
+async function togglePersonaEnabled(name, checkbox) {
   const enabled = checkbox.checked;
   const wrap    = checkbox.parentElement;
-  wrap.querySelector('.toggle-track').style.background = enabled ? '#7C6AF7' : 'var(--border)';
-  wrap.querySelector('.toggle-thumb').style.left       = enabled ? '21px' : '3px';
-  wrap.previousElementSibling && (wrap.previousElementSibling.textContent = enabled ? 'ON' : 'OFF');
-  // ラベル内のspan更新
-  const span = checkbox.closest('label').querySelector('span');
-  if (span) span.textContent = enabled ? 'ON' : 'OFF';
+  wrap.querySelector('.ptoggle-track').style.background = enabled ? '#7C6AF7' : 'var(--border)';
+  wrap.querySelector('.ptoggle-thumb').style.left       = enabled ? '18px' : '2px';
+  const tag = document.getElementById(`ptag-${name}`);
+  if(tag) tag.textContent = enabled ? 'ON' : 'OFF';
   try {
     await fetch(`/api/personas/${encodeURIComponent(name)}`, {
-      method: 'PUT',
-      headers: {'Content-Type': 'application/json'},
+      method:'PUT', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ enabled }),
     });
     showToast(`${name} を${enabled ? 'ON' : 'OFF'}にしました`);
-  } catch(e) {
-    showToast('保存に失敗しました', true);
+  } catch(e) { showToast('保存に失敗しました'); }
+}
+
+function openPersonaModal(nameOrNull) {
+  _editingPersonaName = nameOrNull;
+  const modal = document.getElementById('personaModal');
+  modal.style.display = 'flex';
+
+  // アイコンをリセット
+  _resetModalIcon();
+
+  if(nameOrNull) {
+    const p = _personas.find(x => x.persona_name === nameOrNull);
+    document.getElementById('personaModalTitle').textContent = 'ペルソナを編集';
+    document.getElementById('pName').value    = p ? p.persona_name   : '';
+    document.getElementById('pRole').value    = p ? (p.role || '')   : '';
+    document.getElementById('pPrompt').value  = p ? (p.system_prompt || '') : '';
+    document.getElementById('pEnabled').checked = p ? !!p.enabled    : true;
+    // 既存アイコンをプレビュー表示
+    fetch(`/api/personas/${encodeURIComponent(nameOrNull)}/icon`)
+      .then(r => r.json())
+      .then(data => {
+        if(data.wait)  {
+          _setModalIconPreviewEl('wait',  data.wait);
+        } else {
+          // カスタムなし → デフォルトPNGがあれば表示
+          const defaultKey = PERSONA_IMG_MAP[nameOrNull];
+          if(defaultKey) _setModalIconPreviewEl('wait', `/static/img/personas/${defaultKey}_wait.png`);
+        }
+        if(data.think) _setModalIconPreviewEl('think', data.think);
+        else if(PERSONA_IMG_MAP[nameOrNull]) {
+          _setModalIconPreviewEl('think', `/static/img/personas/${PERSONA_IMG_MAP[nameOrNull]}_think.png`);
+        }
+      }).catch(()=>{});
+  } else {
+    document.getElementById('personaModalTitle').textContent = 'ペルソナを追加';
+    document.getElementById('pName').value    = '';
+    document.getElementById('pRole').value    = '';
+    document.getElementById('pPrompt').value  = '';
+    document.getElementById('pEnabled').checked = true;
   }
 }
+
+function closePersonaModal() {
+  document.getElementById('personaModal').style.display = 'none';
+  _editingPersonaName = null;
+}
+
+let _modalIconFiles  = { wait: null, think: null };
+let _modalIconDelete = { wait: false, think: false };
+
+function _resetModalIcon() {
+  _modalIconFiles  = { wait: null, think: null };
+  _modalIconDelete = { wait: false, think: false };
+  _setModalIconPreviewEl('wait',  null);
+  _setModalIconPreviewEl('think', null);
+  const wi = document.getElementById('pIconWaitFile');
+  const ti = document.getElementById('pIconThinkFile');
+  if(wi) wi.value = '';
+  if(ti) ti.value = '';
+}
+
+function _setModalIconPreviewEl(variant, url) {
+  const previewId = variant === 'wait' ? 'pIconWaitPreview' : 'pIconThinkPreview';
+  const delBtnId  = variant === 'wait' ? 'pIconWaitDelBtn'  : 'pIconThinkDelBtn';
+  const silFill   = '#9CA3AF';
+  const silDark   = '#4B5563';
+  const preview   = document.getElementById(previewId);
+  const delBtn    = document.getElementById(delBtnId);
+  if(!preview) return;
+  if(url) {
+    // blob: URL にはキャッシュバスター不要、通常URLのみ付与
+    const src = url.startsWith('blob:') ? url : `${url}?t=${Date.now()}`;
+    preview.innerHTML = `<img src="${src}" style="width:100%;height:100%;object-fit:cover;">`;
+    if(delBtn) delBtn.style.display = 'inline-block';
+  } else {
+    preview.innerHTML = `<svg viewBox="0 0 56 56" width="72" height="72"><circle cx="28" cy="28" r="28" fill="${silFill}"/><circle cx="28" cy="20" r="10" fill="${silDark}"/><ellipse cx="28" cy="46" rx="16" ry="12" fill="${silDark}"/></svg>`;
+    if(delBtn) delBtn.style.display = 'none';
+  }
+}
+
+function previewModalIcon(variant, input) {
+  const file = input.files[0];
+  if(!file) return;
+  if(file.size > 2 * 1024 * 1024) { showToast('2MB以内のファイルを選択してください'); input.value=''; return; }
+  _modalIconFiles[variant]  = file;
+  _modalIconDelete[variant] = false;
+  _setModalIconPreviewEl(variant, URL.createObjectURL(file));
+}
+
+function clearModalIcon(variant) {
+  _modalIconFiles[variant]  = null;
+  _modalIconDelete[variant] = true;
+  _setModalIconPreviewEl(variant, null);
+}
+
+async function savePersona() {
+  const name    = document.getElementById('pName').value.trim();
+  const role    = document.getElementById('pRole').value.trim();
+  const prompt  = document.getElementById('pPrompt').value.trim();
+  const enabled = document.getElementById('pEnabled').checked;
+
+  if(!name) { showToast('名前を入力してください'); return; }
+
+  try {
+    let res;
+    if(_editingPersonaName) {
+      res = await fetch(`/api/personas/${encodeURIComponent(_editingPersonaName)}`, {
+        method:'PUT', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ persona_name: name, role, system_prompt: prompt, enabled }),
+      });
+    } else {
+      res = await fetch('/api/personas', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ persona_name: name, role, system_prompt: prompt }),
+      });
+    }
+    const data = await res.json();
+    if(data.status !== 'ok') { showToast('エラー: ' + (data.message || '保存に失敗しました')); return; }
+
+    // アイコンの処理（wait/think それぞれ）
+    const targetName = name;
+    for(const variant of ['wait', 'think']) {
+      if(_modalIconDelete[variant]) {
+        await fetch(`/api/personas/${encodeURIComponent(targetName)}/icon?variant=${variant}`, { method:'DELETE' }).catch(()=>{});
+      } else if(_modalIconFiles[variant]) {
+        const form = new FormData();
+        form.append('file', _modalIconFiles[variant]);
+        form.append('variant', variant);
+        const iconRes  = await fetch(`/api/personas/${encodeURIComponent(targetName)}/icon`, { method:'POST', body:form }).catch(()=>null);
+        if(iconRes) {
+          const iconData = await iconRes.json().catch(()=>({}));
+          if(iconData.status !== 'ok') showToast(`アイコン(${variant})の保存に失敗: ` + (iconData.message||''));
+        }
+      }
+    }
+
+    showToast(_editingPersonaName ? '更新しました ✓' : '追加しました ✓');
+    closePersonaModal();
+    await loadPersonas();
+  } catch(e) { showToast('通信エラーが発生しました'); }
+}
+
+async function deletePersona(name) {
+  if(!confirm(`ペルソナ「${name}」を削除しますか？\nこの操作は取り消せません。`)) return;
+  try {
+    await fetch(`/api/personas/${encodeURIComponent(name)}`, { method:'DELETE' });
+    showToast(`${name} を削除しました`);
+    await loadPersonas();
+  } catch(e) { showToast('削除に失敗しました'); }
+}
+
+// モーダル外クリックで閉じる
+document.addEventListener('click', (e) => {
+  const modal = document.getElementById('personaModal');
+  if(modal && e.target === modal) closePersonaModal();
+});
 
 // ページ読み込み時にペルソナも取得
 document.addEventListener('DOMContentLoaded', () => {
   loadPersonas();
+});
+
+// ── 動作検証フラグ管理 ──────────────────────────────
+function setDebugFlag(key, value) {
+  if(value) {
+    sessionStorage.setItem('cove_debug_' + key, '1');
+  } else {
+    sessionStorage.removeItem('cove_debug_' + key);
+  }
+  const label = { 
+    ollama_disconnect: 'Ollama切断',
+    memory_error:      'メモリ不足',
+    disk_error:        'ディスク不足',
+    model_not_found:   'モデル未インストール',
+    ffmpeg_not_found:  'ffmpeg未インストール'
+  }[key] || key;
+  showToast(value ? `🧪 ${label} ON` : `✅ ${label} OFF`);
+}
+
+function resetAllDebugFlags() {
+  ['ollama_disconnect','memory_error','disk_error','model_not_found','ffmpeg_not_found'].forEach(k => {
+    sessionStorage.removeItem('cove_debug_' + k);
+  });
+  document.querySelectorAll('[id^="debug-"]').forEach(el => el.checked = false);
+  showToast('✅ すべてのデバッグフラグをOFFにしました');
+}
+
+// 設定画面を開いたときにフラグの状態を反映
+document.addEventListener('DOMContentLoaded', () => {
+  const map = {
+    'ollama_disconnect': 'debug-ollama',
+    'memory_error':      'debug-memory',
+    'disk_error':        'debug-disk',
+    'model_not_found':   'debug-model',
+    'ffmpeg_not_found':  'debug-ffmpeg',
+  };
+  Object.entries(map).forEach(([key, id]) => {
+    const el = document.getElementById(id);
+    if(el) el.checked = !!sessionStorage.getItem('cove_debug_' + key);
+  });
 });

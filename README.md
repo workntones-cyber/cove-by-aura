@@ -1,157 +1,256 @@
-# AURA
-**Audio Understanding & Recording Assistant**
+# COVE by AURA
 
-音声を録音し、AIが自動で文字起こし・要約するデスクトップアプリです。
+> 完全ローカル・完全秘匿の AI 意思決定支援ツール
 
----
-
-## 概要・利用用途
-
-AURAは、会議・打ち合わせ・インタビューなどの音声を録音し、AIが自動で文字起こしと要約を行うツールです。録音後すぐに内容を把握でき、議事録作成の手間を大幅に削減します。
-
-🔒 **ビジネス用モードでは音声データを外部に一切送信しません。完全ローカル処理のため、機密情報・社内情報を含む会議でも安心して使用できます。**
-
-**こんな場面に最適です：**
-- 会議室にノートPCを持ち込んで録音 → 自動で議事録を生成
-- Zoom・Google Meet・Teams などのオンライン会議を録音・要約
-- 機密情報を含む社内会議・重要な意思決定会議（ビジネス用モード推奨）
-- 1on1・面談の記録
-- 講演・セミナーのメモ作成
-- ひとりでのアイデアメモ・口述筆記
-
-> **注意：** AURAはPCのマイク入力またはシステム音声を録音します。オンライン会議（Zoom・Google Meet等）の音声を録音するには、設定画面で「システム音声」モードに切り替えてください。Macの場合は別途BlackHoleのインストールが必要です。
+[![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/)
+[![Flask](https://img.shields.io/badge/Flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
+[![Ollama](https://img.shields.io/badge/Ollama-required-orange.svg)](https://ollama.com/)
+[![License](https://img.shields.io/badge/License-Private-red.svg)]()
 
 ---
 
-## 動作環境・必要要件
+## 概要
 
-### 共通
-| 項目 | 要件 |
-|---|---|
-| Python | 3.11 以上 |
-| パッケージ管理 | [uv](https://docs.astral.sh/uv/) |
-| ブラウザ | Chrome / Edge / Safari（最新版推奨） |
-| マイク | PC内蔵マイク または 外付けマイク |
+COVE は、経営者・管理職向けの **完全ローカル動作** する AI 意思決定支援ツールです。  
+録音・文字起こし・保管庫・複数ペルソナによる多角的相談を、インターネット接続なしで完結させます。
 
-### Windows
-| 項目 | 要件 |
-|---|---|
-| OS | Windows 10 / 11 |
-| ビジネス用モード（faster-whisper） | GPU VRAM 8GB以上推奨（CPUでも動作可・処理に時間がかかる場合あり） |
-| ビジネス用モード（要約） | **Ollama が必須**（別途インストール要） |
+**秘匿性が最大の特徴です。** 会議録音・経営判断・個人情報は一切クラウドに送信されません。
 
-### Mac
-| 項目 | 要件 |
+### 主な機能
+
+| 機能 | 説明 |
 |---|---|
-| OS | macOS 12 以上 |
-| 対応チップ | Apple Silicon（M1 / M2 / M3）推奨 |
-| ビジネス用モード（faster-whisper） | Apple Silicon Mac のみ対応（Intel Mac は個人用モードのみ） |
-| ビジネス用モード（要約） | **Ollama が必須**（別途インストール要） |
-| ポート | 5001（macOS 12以降はポート5000がシステムに占有されるため） |
+| 🎙️ **録音** | マイク・システム音声の録音、文字起こし、AI 要約 |
+| 🗄️ **保管庫** | テキストメモ・ファイル・Web データ・録音データを一元管理 |
+| 💬 **相談室** | 8 種のペルソナが多角的な視点で意思決定を支援 |
+| ⚙️ **設定** | ペルソナ・カテゴリ・AI モデルのカスタマイズ |
 
 ---
 
-## AIモード
+## 動作環境
 
-AURAには2つのAIモードがあります。設定画面から切り替えられます。
+| 項目 | 要件 |
+|---|---|
+| OS | Windows 10/11、macOS 13 (Ventura) 以降 |
+| Python | 3.12 以上 |
+| RAM | 16GB 以上推奨（gemma3:27b 使用時は 24GB 以上） |
+| VRAM / 統合メモリ | 8GB 以上（16GB 以上推奨） |
+| ストレージ | 30GB 以上の空き容量（モデルファイル含む） |
 
-## 処理フロー
+---
 
-| ステップ | 個人用モード | ビジネス用モード |
+## セットアップ
+
+### 1. 必要なツールのインストール
+
+#### Python / uv
+
+```bash
+# uv のインストール（Windows）
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# uv のインストール（Mac）
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+#### Ollama
+
+[https://ollama.com/download](https://ollama.com/download) からインストーラーをダウンロードして実行してください。
+
+#### ffmpeg
+
+```bash
+# Windows（winget）
+winget install ffmpeg
+
+# Mac（Homebrew）
+brew install ffmpeg
+```
+
+---
+
+### 2. リポジトリのクローン
+
+```bash
+git clone https://github.com/workntones-cyber/cove-by-aura.git
+cd cove-by-aura
+```
+
+---
+
+### 3. AI モデルのダウンロード
+
+```bash
+# 推奨モデル（約17GB・ダウンロードに30分〜1時間程度）
+ollama pull gemma3:27b
+
+# VRAM が 8GB の場合はこちら
+ollama pull gemma3:12b
+```
+
+---
+
+### 4. 依存パッケージのインストール
+
+```bash
+uv sync
+```
+
+---
+
+### 5. 起動
+
+```bash
+uv run python main.py
+```
+
+ブラウザで [http://127.0.0.1:5001](http://127.0.0.1:5001) にアクセスしてください。  
+起動後、設定画面で **AI モード → ビジネス用** を選択してください。
+
+---
+
+## ディレクトリ構成
+
+```
+cove-by-aura/
+├── main.py                         # Flask アプリ・全 API エンドポイント
+├── app/
+│   ├── database.py                 # DB スキーマ・CRUD 関数
+│   ├── cove.db                     # SQLite データベース（自動生成）
+│   ├── services/
+│   │   ├── transcriber.py          # 文字起こし・クリーニング・要約
+│   │   └── recorder.py             # 録音デバイス管理
+│   ├── templates/
+│   │   ├── index.html              # 録音画面
+│   │   ├── vault.html              # 保管庫
+│   │   ├── council.html            # 相談室
+│   │   └── settings.html          # 設定画面
+│   └── static/
+│       ├── css/style.css
+│       ├── js/
+│       │   ├── recorder.js
+│       │   └── settings.js
+│       └── img/personas/           # ペルソナアイコン画像
+├── uploads/                        # 録音 WAV ファイル（自動生成）
+├── .env                            # 環境設定（自動生成）
+└── README.md
+```
+
+---
+
+## 設定・カスタマイズ
+
+### AI モードの切り替え
+
+設定画面（⚙️）→ AI モードから切り替えられます。
+
+| モード | 説明 |
+|---|---|
+| **ビジネス用** | 完全ローカル（Ollama）。インターネット不要。秘匿性最大。 |
+| 個人用 | Groq API を使用（API キー必要）。高速だがクラウド送信あり。 |
+
+### Ollama モデルの変更
+
+設定画面 → Ollama モデル設定 からモデルを切り替えられます。
+
+| モデル | VRAM 目安 | 特徴 |
 |---|---|---|
-| ① 文字起こし | Groq Whisper（クラウド） | faster-whisper（ローカル） |
-| ② クリーニング | Groq LLaMA（クラウド） | Ollama（ローカル） |
-| ③ 要約 | Groq LLaMA（クラウド） | Ollama（ローカル） |
-| 秘匿性 | ❌ 外部送信あり | ✅ 完全ローカル |
+| `gemma3:27b` | 16GB〜 | **推奨**・高精度 |
+| `gemma3:12b` | 8GB〜 | 軽量・高速 |
+| `llama3.1:8b` | 6GB〜 | 最軽量 |
 
-> ② クリーニングとは、文字起こし結果から挨拶・相槌・フィラー等の不要文字列をAIが自動除去するステップです。
+### ペルソナのカスタマイズ
 
----
-
-### 👤 個人用モード（Groq API）
-
-クラウド上のAIを使って文字起こし・要約を行います。
-
-- **文字起こし：** Groq Whisper（`whisper-large-v3-turbo`）
-- **要約：** Groq LLaMA（`llama-3.3-70b-versatile`）
-- **必要なもの：** Groq APIキー（無料で取得可能）
-- **特徴：** セットアップが簡単・高速・高精度
-
-Groq APIキーの取得：[https://console.groq.com/keys](https://console.groq.com/keys)
-
-### 🏢 ビジネス用モード（faster-whisper）
-
-音声データを外部に送信せず、PC上で完全ローカル処理します。
-
-- **文字起こし：** faster-whisper（`medium` モデル・約1.5GB）
-- **要約：** Groq LLaMA（Groq APIキーがあれば使用）
-- **必要なもの：** 初回起動時にモデルファイルを自動ダウンロード（約1.5GB）
-- **特徴：** 機密情報・社内情報の録音に最適。音声データが外部に出ない
-
-> **対応環境：** Windows（GPU/CPU）、Mac Apple Silicon（CPU）
+設定画面 → ペルソナ管理 から 8 種のペルソナを追加・編集・削除できます。  
+システムプロンプトを書き換えることで、業界特化型のペルソナを作成できます。
 
 ---
 
-## 録音モード
+## データベース構成
 
-設定画面から録音ソースを切り替えられます。
-
-### 🎤 マイク入力（デフォルト）
-
-PC内蔵マイクまたは外付けマイクで録音します。対面会議・インタビューに最適です。
-
-> オンライン会議（Zoom・Meet等）の相手の音声は録音されません。
-
-### 🖥️ システム音声（オンライン会議対応）
-
-PCから出力されるすべての音声を録音します。オンライン会議の音声録音に最適です。
-
-**Windows の場合：** 追加設定不要で利用できます。
-
-**Mac の場合：** BlackHole のインストールが必要です。
-
-#### Mac：BlackHole セットアップ手順
-
-**Step 1. BlackHole 2ch をダウンロード・インストール**
-
-[https://existential.audio/blackhole/](https://existential.audio/blackhole/) から **「BlackHole 2ch」** をダウンロードしてインストールします（16ch・64ch は不要）。
-
-**Step 2. Mac を再起動**
-
-インストール後、必ず再起動してください。
-
-**Step 3. Audio MIDI設定で「複数出力装置」を作成**
-
-1. Finder →「アプリケーション」→「ユーティリティ」→「Audio MIDI設定」を開く
-2. 左下の「＋」→「複数出力装置を作成」
-3. 「BlackHole 2ch」と使用中のスピーカーの両方にチェック
-
-**Step 4. システム設定でサウンド出力を切り替え**
-
-「システム設定」→「サウンド」→ 出力を「複数出力装置」に変更します。
-
-> ⚠️ この設定後はキーボードでの音量調整が効かなくなります。事前に「システム設定」→「コントロールセンター」→「サウンド」→「メニューバーに表示：常に表示」に設定しておくと、メニューバーの🔊アイコンから音量調整できます。
-
-**Step 5. AURA を再起動**
-
-再起動後、AURAがBlackHoleを自動検出します。設定画面で「✅ BlackHole を検出しました」と表示されれば完了です。
-
+```
+categories        カテゴリ管理
+recordings        録音データ（文字起こし・要約含む）
+vault_memos       テキストメモ
+vault_files       アップロードファイル
+persona_settings  ペルソナ定義・システムプロンプト
+council_sessions  相談履歴
+council_adopted   採用回答・★評価
+```
 
 ---
 
+## プライバシー・セキュリティ
+
+- **ビジネス用モードでは、すべての処理がローカルで完結します**
+- 音声データ・テキスト・相談内容は外部サーバーに一切送信されません
+- データは `app/cove.db`（SQLite）と `uploads/`（WAV ファイル）にのみ保存されます
+- Ollama は `127.0.0.1:11434` でローカル起動します
+
 ---
 
-## 📚 ドキュメント
+## トラブルシューティング
 
-| ドキュメント | 内容 |
+### Ollama が起動しない
+
+```bash
+# Ollama の状態確認
+ollama list
+
+# 手動起動
+ollama serve
+```
+
+### 文字起こしが失敗する
+
+- Ollama が起動しているか確認してください
+- `faster-whisper` のインストールを確認してください
+
+```bash
+uv add faster-whisper
+```
+
+### ffmpeg が見つからない
+
+トリミング機能を使用するには ffmpeg が必要です。
+
+```bash
+# Windows
+winget install ffmpeg
+
+# Mac
+brew install ffmpeg
+```
+
+PowerShell / ターミナルを再起動後に再試行してください。
+
+### ポート 5001 が使用中
+
+```bash
+# Windows
+netstat -ano | findstr :5001
+
+# Mac / Linux
+lsof -i :5001
+```
+
+---
+
+## 技術スタック
+
+| カテゴリ | 技術 |
 |---|---|
-| [インストール手順](docs/INSTALL.md) | パッケージ版・Ollama・開発者向けセットアップ |
-| [使い方](docs/USAGE.md) | 録音・文字起こし・設定画面の操作方法 |
-| [ビルド・開発](docs/BUILD.md) | PyInstallerビルド・開発者向け情報 |
-| [セキュリティ](SECURITY.md) | セキュリティソフトの警告・データ保護について |
+| バックエンド | Python 3.12 / Flask |
+| データベース | SQLite |
+| AI 推論（ローカル） | Ollama（llama.cpp ベース） |
+| 文字起こし | faster-whisper |
+| フロントエンド | HTML / CSS / Vanilla JS |
+| 音声処理 | Web Audio API / ffmpeg |
+| パッケージ管理 | uv |
 
 ---
 
 ## ライセンス
 
-MIT License
+Private - All Rights Reserved  
+© 2026 AURA / workntones-cyber

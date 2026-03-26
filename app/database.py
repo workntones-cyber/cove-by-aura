@@ -37,6 +37,11 @@ def init_db() -> None:
             INSERT OR IGNORE INTO categories (id, name, color, created_at)
             VALUES (1, '未分類', '#6B7280', ?)
         """, (now,))
+        # 利用者情報カテゴリ（id=2、削除不可）
+        conn.execute("""
+            INSERT OR IGNORE INTO categories (id, name, color, created_at)
+            VALUES (2, '利用者情報', '#7C6AF7', ?)
+        """, (now,))
 
         # ── 録音テーブル ──────────────────────────────
         conn.execute("""
@@ -124,20 +129,132 @@ def init_db() -> None:
         # ── 相談室：ペルソナ設定テーブル ─────────────
         conn.execute("""
             CREATE TABLE IF NOT EXISTS persona_settings (
-                persona_name TEXT PRIMARY KEY,
-                enabled      INTEGER NOT NULL DEFAULT 1
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                persona_name  TEXT    NOT NULL UNIQUE,
+                role          TEXT    NOT NULL DEFAULT '',
+                system_prompt TEXT    NOT NULL DEFAULT '',
+                enabled       INTEGER NOT NULL DEFAULT 1
             )
         """)
+        # 既存テーブルに列がなければ追加（マイグレーション）
+        existing_cols = [row[1] for row in conn.execute("PRAGMA table_info(persona_settings)").fetchall()]
+        if 'id' not in existing_cols:
+            conn.execute("ALTER TABLE persona_settings ADD COLUMN id INTEGER")
+        if 'role' not in existing_cols:
+            conn.execute("ALTER TABLE persona_settings ADD COLUMN role TEXT NOT NULL DEFAULT ''")
+        if 'system_prompt' not in existing_cols:
+            conn.execute("ALTER TABLE persona_settings ADD COLUMN system_prompt TEXT NOT NULL DEFAULT ''")
 
         # デフォルトペルソナを挿入（なければ）
         default_personas = [
-            "戦略家", "リスク管理者", "アナリスト", "クリエイター",
-            "法務・コンプラ", "ユーザー視点", "クレーマー", "マーケッター",
+            ("戦略家", "攻撃的・勝ちにいく", """あなたは企業戦略顧問だ。勝つことだけを考える。
+
+【思考の癖】
+リスクは「織り込み済み」として無視する。「できない理由」は言わない。競合より先に動くことに執着する。
+
+【出力形式・厳守】
+▶ 勝ち筋：（一言で断言。「〜で勝てる」「〜が唯一の選択肢」）
+▶ 根拠：（なぜ勝てるか。数字・タイミング・競合比較で述べる）
+▶ 今週やること：（具体的な行動1つ。期限と担当を含む）
+
+【禁止】前置き・謝辞・「〜と思います」・リスク指摘・法的懸念・300字超過"""),
+
+            ("リスク管理者", "保守的・問題指摘", """あなたはリスク管理の専門家だ。楽観論を絶対に信じない。
+
+【思考の癖】
+必ず最悪のシナリオから考え始める。「うまくいく前提」の話は聞かない。数字の裏を必ず疑う。「やるべき」は言わない。「やってはいけない理由」を探す。
+
+【出力形式・厳守】
+⚠ 最大リスク：（このまま進んだ場合に起きる最悪の事態・一文で断言）
+⚠ 見落とし①：（相談者が楽観視している落とし穴）
+⚠ 見落とし②：（外部環境・人・法律・コストのどれかに絡む第二の落とし穴）
+⚠ 最低限の対策：（撤退・保険・検証のいずれか1つ。「やれ」ではなく「せめてこれだけは」）
+
+【禁止】前置き・褒め言葉・「チャンスです」・攻めの提案・アイデア提案・300字超過"""),
+
+            ("アナリスト", "データ・客観的分析", """あなたはビジネスアナリストだ。感情も戦略も出さない。数字と構造だけで話す。
+
+【思考の癖】
+「なぜそう言えるのか」を常に問う。相関と因果を厳密に区別する。定量化できない主張は「仮説」と明記する。結論を出す前に前提条件を確認する。
+
+【出力形式・厳守】
+📊 構造的判定：（「〜という構造上、〜になる」の形で一文。感情語禁止）
+📊 根拠①：（数値・事実・因果関係のいずれか。出典不明なら「推定」と明記）
+📊 根拠②：（根拠①とは別の切り口から）
+📊 判断に必要な不足情報：（この判断を確定するために今すぐ調べるべきデータ1つ）
+
+【禁止】前置き・「〜すべき」・感情語・アイデア・戦略提案・リスク警告・300字超過"""),
+
+            ("クリエイター", "発想力・斬新アイデア", """あなたはクリエイティブディレクターだ。「普通」「無難」「定番」は存在しない。
+
+【思考の癖】
+常識の逆を考える。誰もやっていないことに価値を見出す。「それは難しい」は禁句。「だからこそ面白い」に変換する。10人中1人にしか刺さらないアイデアの方が価値が高い。
+
+【出力形式・厳守】
+💡 ひらめき：（誰も思いつかないアイデアを一言。具体的な固有名詞・手法を含む）
+💡 なぜ刺さるか：（人間の心理・欲求・社会の空白のどれかを使って説明）
+💡 最初の一手：（明日から試せる小さな実験。コスト・期間・担当を含む）
+
+【禁止】前置き・「現実的には」・無難な提案・リスク指摘・データ分析・300字超過"""),
+
+            ("法務・コンプラ", "規則・法的観点", """あなたは法務・コンプライアンスの専門家だ。利益よりルールを優先する。
+
+【思考の癖】
+「グレーゾーン」は黒と見なす。「みんなやっている」は免罪符にならない。感情論・ビジネス論は一切考慮しない。法令・規約・判例・ガイドラインに基づいてのみ話す。
+
+【出力形式・厳守】
+⚖ 法的判定：（「適法」「違法の可能性」「グレー」を最初の一語で明示。根拠となる法律名・条項を添える）
+⚖ 違反リスク：（罰則・行政処分・民事責任・レピュテーション損害のうち該当するもの）
+⚖ 適法な代替案：（同じ目的を達成できる法的に問題ない方法。なければ「代替なし・中止を推奨」）
+
+【禁止】前置き・「たぶん大丈夫」・法的根拠のない主張・ビジネス上の損得論・300字超過"""),
+
+            ("ユーザー視点", "現場・顧客目線", """あなたは現場で使うユーザーの代弁者だ。作る側・売る側・経営側の論理を持ち込まない。
+
+【思考の癖】
+「使う人が最初に感じる感情」から考える。説明書を読まない前提で考える。「これ、意味わかる？」「これ、面倒くさくない？」と常に問う。良い点も言うが、必ず「でも〜が気になる」を添える。
+
+【出力形式・厳守】
+👤 第一印象：（使い始めた瞬間に感じる率直な感情。「わかりにくい」「逆に簡単」「なぜこの順番？」等）
+👤 本音の要望：（ユーザーが口には出さないが本当に求めていること1つ。「〜してほしい」の形で）
+👤 離脱ポイント：（「ここで使うのをやめる」と感じる瞬間・場面を具体的に1つ）
+
+【禁止】前置き・専門用語・作り手への配慮・解決策の提案・データ引用・300字超過"""),
+
+            ("クレーマー", "批判・欠点指摘", """あなたは最も手強い批判者だ。どんな提案にも必ず欠陥がある。
+
+【思考の癖】
+褒めることは一切しない。欠点を見つけることが生きがいだ。「でも〜は？」「〜したらどうなる？」と常に疑う。他のペルソナが「良い」と言ったことに必ず反論できる。
+
+【出力形式・厳守】
+🔥 致命的欠陥：（この提案が失敗する最大の理由・一文で断言。「甘い」「見通しが甘すぎる」等）
+🔥 突っ込み①：（戦略・数字・前提のどれかに対する具体的な反論）
+🔥 突っ込み②：（人・組織・市場・法律のどれかに潜む見落とし）
+
+【禁止】前置き・褒め言葉・ポジティブな言葉・解決策の提示・300字超過"""),
+
+            ("マーケッター", "市場・ブランド戦略", """あなたはマーケティング戦略家だ。「売れるか・広まるか・選ばれるか」の3軸だけで考える。
+
+【思考の癖】
+「良い商品が売れる」という幻想を持たない。「誰に・いつ・どんな感情で買われるか」を先に決める。競合と同じことをやっても意味がない。「なぜ今これを買う必要があるのか」を常に問う。
+
+【出力形式・厳守】
+📣 売れる/売れない判定：（一言で断言。「このままでは売れない」「〜条件付きで売れる」等）
+📣 刺さるターゲット：（年齢・職業ではなく「〜な状況にいる人」「〜に悩んでいる人」で定義）
+📣 差別化メッセージ：（競合が言っていない・言えないことを一言で。キャッチコピー形式）
+
+【禁止】前置き・「認知度向上」・抽象的な施策・根拠のない楽観論・法律・リスク論・300字超過"""),
         ]
-        for name in default_personas:
+        for name, role, prompt in default_personas:
             conn.execute(
-                "INSERT OR IGNORE INTO persona_settings (persona_name, enabled) VALUES (?, 1)",
-                (name,)
+                "INSERT OR IGNORE INTO persona_settings (persona_name, role, system_prompt, enabled) VALUES (?, ?, ?, 1)",
+                (name, role, prompt)
+            )
+            # デフォルトペルソナは常に最新プロンプトに更新（手動編集していない場合）
+            # ※設定画面で手動編集した場合は上書きされる
+            conn.execute(
+                "UPDATE persona_settings SET role=?, system_prompt=? WHERE persona_name=?",
+                (role, prompt, name)
             )
 
         # ── 相談室：セッションテーブル ────────────
@@ -160,9 +277,14 @@ def init_db() -> None:
                              REFERENCES council_sessions(id) ON DELETE CASCADE,
                 persona_name TEXT    NOT NULL,
                 answer       TEXT    NOT NULL DEFAULT '',
+                rating       INTEGER NOT NULL DEFAULT 0,
                 created_at   TEXT    NOT NULL
             )
         """)
+        # 既存テーブルに rating カラムがなければ追加
+        adopted_cols = [r[1] for r in conn.execute("PRAGMA table_info(council_adopted)").fetchall()]
+        if 'rating' not in adopted_cols:
+            conn.execute("ALTER TABLE council_adopted ADD COLUMN rating INTEGER NOT NULL DEFAULT 0")
 
         conn.commit()
     print("[database] 初期化完了")
@@ -216,6 +338,11 @@ def delete_category(category_id: int) -> dict:
     """カテゴリを削除し、紐づくデータを未分類(id=1)に移動する"""
     if category_id == 1:
         return {"status": "error", "message": "未分類は削除できません"}
+    # 利用者情報カテゴリは名前で保護（IDは環境依存のため）
+    with get_connection() as conn:
+        row = conn.execute("SELECT name FROM categories WHERE id=?", (category_id,)).fetchone()
+        if row and row['name'] == '利用者情報':
+            return {"status": "error", "message": "利用者情報は削除できません"}
     with get_connection() as conn:
         # 紐づくデータを未分類に移動
         conn.execute(
@@ -493,10 +620,10 @@ def delete_vault_items_by_category(category_id: int) -> int:
 # ══════════════════════════════════════════════════
 
 def get_all_persona_settings() -> list[dict]:
-    """全ペルソナ設定を返す"""
+    """全ペルソナ設定を返す（rowid順）"""
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT persona_name, enabled FROM persona_settings ORDER BY rowid"
+            "SELECT rowid, persona_name, role, system_prompt, enabled FROM persona_settings ORDER BY rowid"
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -508,6 +635,42 @@ def update_persona_enabled(persona_name: str, enabled: bool) -> dict:
             "UPDATE persona_settings SET enabled = ? WHERE persona_name = ?",
             (1 if enabled else 0, persona_name)
         )
+        conn.commit()
+    return {"status": "ok"}
+
+
+def create_persona(persona_name: str, role: str, system_prompt: str) -> dict:
+    """新しいペルソナを追加する"""
+    try:
+        with get_connection() as conn:
+            conn.execute(
+                "INSERT INTO persona_settings (persona_name, role, system_prompt, enabled) VALUES (?, ?, ?, 1)",
+                (persona_name.strip(), role.strip(), system_prompt.strip())
+            )
+            conn.commit()
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+def update_persona(persona_name: str, new_name: str, role: str, system_prompt: str, enabled: bool) -> dict:
+    """ペルソナを更新する"""
+    try:
+        with get_connection() as conn:
+            conn.execute(
+                "UPDATE persona_settings SET persona_name=?, role=?, system_prompt=?, enabled=? WHERE persona_name=?",
+                (new_name.strip(), role.strip(), system_prompt.strip(), 1 if enabled else 0, persona_name)
+            )
+            conn.commit()
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+def delete_persona(persona_name: str) -> dict:
+    """ペルソナを削除する"""
+    with get_connection() as conn:
+        conn.execute("DELETE FROM persona_settings WHERE persona_name=?", (persona_name,))
         conn.commit()
     return {"status": "ok"}
 
@@ -529,6 +692,14 @@ def create_council_session(question: str, category_id: int, final_decision: str 
     return cursor.lastrowid
 
 
+def delete_council_session(session_id: int) -> dict:
+    """相談セッションを削除する（採用回答もCASCADE削除）"""
+    with get_connection() as conn:
+        conn.execute("DELETE FROM council_sessions WHERE id=?", (session_id,))
+        conn.commit()
+    return {"status": "ok"}
+
+
 def update_council_session_decision(session_id: int, final_decision: str) -> dict:
     """最終判断メモを更新する"""
     with get_connection() as conn:
@@ -541,9 +712,16 @@ def update_council_session_decision(session_id: int, final_decision: str) -> dic
 
 
 def create_council_adopted(session_id: int, persona_name: str, answer: str) -> int:
-    """採用した回答を保存する"""
+    """採用した回答を保存する（同一セッション・同一ペルソナの重複は無視）"""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with get_connection() as conn:
+        # 既に同じペルソナの回答が登録されていれば追加しない
+        exists = conn.execute(
+            "SELECT id FROM council_adopted WHERE session_id=? AND persona_name=?",
+            (session_id, persona_name)
+        ).fetchone()
+        if exists:
+            return exists['id']
         cursor = conn.execute(
             "INSERT INTO council_adopted (session_id, persona_name, answer, created_at) VALUES (?, ?, ?, ?)",
             (session_id, persona_name, answer.strip(), now)
@@ -553,30 +731,68 @@ def create_council_adopted(session_id: int, persona_name: str, answer: str) -> i
     return cursor.lastrowid
 
 
-def get_council_sessions(category_id: int = None, limit: int = 20) -> list[dict]:
-    """相談履歴を返す（採用回答も含む）"""
+def get_council_sessions(category_id: int = None, keyword: str = "", date_from: str = "", date_to: str = "", limit: int = 100) -> list[dict]:
+    """相談履歴を検索・フィルターして返す"""
     with get_connection() as conn:
-        if category_id is not None:
-            sessions = conn.execute(
-                "SELECT * FROM council_sessions WHERE category_id = ? ORDER BY created_at DESC LIMIT ?",
-                (category_id, limit)
-            ).fetchall()
-        else:
-            sessions = conn.execute(
-                "SELECT * FROM council_sessions ORDER BY created_at DESC LIMIT ?",
-                (limit,)
-            ).fetchall()
+        query  = """
+            SELECT cs.id, cs.question, cs.category_id, cs.final_decision, cs.created_at,
+                   c.name AS category_name
+            FROM council_sessions cs
+            LEFT JOIN categories c ON c.id = cs.category_id
+            WHERE 1=1
+        """
+        params = []
+        if category_id:
+            query += " AND cs.category_id = ?"
+            params.append(category_id)
+        if keyword:
+            query += " AND (cs.question LIKE ? OR cs.final_decision LIKE ?)"
+            params.extend([f"%{keyword}%", f"%{keyword}%"])
+        if date_from:
+            query += " AND cs.created_at >= ?"
+            params.append(date_from)
+        if date_to:
+            query += " AND cs.created_at <= ?"
+            params.append(date_to + " 23:59:59")
+        query += f" ORDER BY cs.created_at DESC LIMIT {limit}"
 
-        result = []
+        sessions = conn.execute(query, params).fetchall()
+        result   = []
         for s in sessions:
-            s_dict = dict(s)
             adopted = conn.execute(
-                "SELECT persona_name, answer FROM council_adopted WHERE session_id = ? ORDER BY created_at",
-                (s_dict["id"],)
+                "SELECT id, persona_name, answer, rating FROM council_adopted WHERE session_id=? ORDER BY rating DESC, created_at",
+                (s['id'],)
             ).fetchall()
-            s_dict["adopted"] = [dict(a) for a in adopted]
-            result.append(s_dict)
+            d = dict(s)
+            d['adopted'] = [dict(a) for a in adopted]
+            result.append(d)
     return result
+
+
+def update_adopted_rating(adopted_id: int, rating: int) -> dict:
+    """採用回答の評価（★1〜5）を更新する"""
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE council_adopted SET rating=? WHERE id=?",
+            (max(0, min(5, rating)), adopted_id)
+        )
+        conn.commit()
+    return {"status": "ok"}
+
+
+def get_highly_rated_answers(persona_name: str, limit: int = 3) -> list[dict]:
+    """指定ペルソナの高評価回答（★3以上）を返す"""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """SELECT ca.id, ca.answer, ca.rating, cs.question
+               FROM council_adopted ca
+               JOIN council_sessions cs ON cs.id = ca.session_id
+               WHERE ca.persona_name = ? AND ca.rating >= 3
+               ORDER BY ca.rating DESC, ca.created_at DESC
+               LIMIT ?""",
+            (persona_name, limit)
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def get_context_for_category(category_id: int) -> dict:

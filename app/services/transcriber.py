@@ -42,22 +42,16 @@ def _read_env() -> dict:
 
 
 # ── メイン関数 ────────────────────────────────────
-def transcribe_and_summarize(wav_filename: str, extra_prompt: str = "", record_id: int = None) -> dict:
+def transcribe_and_summarize(wav_filename: str, extra_prompt: str = "", record_id: int = None, abort_event=None, progress_callback=None) -> dict:
     """
     WAVファイルを文字起こし & AI要約する。
-
-    Args:
-        wav_filename: uploads/ 配下のファイル名（例: aura_20260101_120000.wav）
-
-    Returns:
-        {"status": "done", "transcript": str, "ai_summary": str}
-        or {"status": "error", "message": str}
+    progress_callback(step, message, progress): 進捗通知コールバック
     """
     env     = _read_env()
     ai_mode = env.get("AI_MODE", "personal")
 
     if ai_mode == "business":
-        return _transcribe_faster_whisper(wav_filename, extra_prompt, record_id)
+        return _transcribe_faster_whisper(wav_filename, extra_prompt, record_id, abort_event=abort_event, progress_callback=progress_callback)
     else:
         return _transcribe_groq(wav_filename, env)
 
@@ -364,112 +358,149 @@ def _get_ollama_model() -> str:
     return _read_env().get("OLLAMA_MODEL", "llama3.1:8b")
 
 
-def _clean_transcript_ollama(raw_transcript: str) -> str:
-    """
-    Ollamaを使って文字起こしから不要文字列を除去する。
-    挨拶・相槌・フィラー・定型文を削除し本質的な内容のみ残す。
-    """
-    import urllib.request
-    import json
 
-    prompt = (
-        "以下は会議の音声を文字起こしした生テキストです。\n"
-        "以下の種類の文字列を除去して、会議の本質的な内容だけを残してください。\n\n"
-        "【除去する文字列の種類】\n"
-        "・挨拶（お世話になります、よろしくお願いします、ありがとうございます等）\n"
-        "・相槌・短い返答（はい、そうですね、なるほど、とんでもないです等）\n"
-        "・フィラー（あー、えーと、うーん、まあ等）\n"
-        "・謝罪の定型文（すみません、失礼します等）単独のもの\n"
-        "・会議の開始・終了の定型文（では始めます、以上です等）\n\n"
-        "【残す文字列】\n"
-        "・議題・提案・質問・回答・意見・決定事項\n"
-        "・具体的な数字・固有名詞・日付を含む発言\n"
-        "・状況説明・背景説明\n\n"
-        "除去後のテキストのみ出力してください（説明文・前置きは不要）。\n\n"
-        f"【文字起こし】\n{raw_transcript}"
-    )
+def _chunk_text(text: str, max_chars: int = 3000) -> list:
+    """テキストを行単位で分割する"""
+    if len(text) <= max_chars:
+        return [text]
+    chunks, current = [], ""
+    for line in text.split("\n"):
+        if len(current) + len(line) > max_chars and current:
+            chunks.append(current.strip())
+            current = line + "\n"
+        else:
+            current += line + "\n"
+    if current.strip():
+        chunks.append(current.strip())
+    return chunks
 
-    payload = json.dumps({
-        "model":  _get_ollama_model(),
-        "prompt": prompt,
-        "stream": False,
-    }).encode("utf-8")
+def _clean_transcript_ollama(raw_transcript: str, abort_event=None, progress_cb=None) -> str:
+    """長文対応：チャンク分割してクリーニング"""
+    import urllib.request, json
 
-    req = urllib.request.Request(
-        "http://127.0.0.1:11434/api/generate",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
+    if abort_event and abort_event.is_set():
+        return raw_transcript
 
-    try:
-        with urllib.request.urlopen(req, timeout=None) as res:
-            data = json.loads(res.read().decode("utf-8"))
-            cleaned = data.get("response", "").strip()
-            print(f"[transcriber] Ollama クリーニング完了: {len(raw_transcript)}文字 → {len(cleaned)}文字")
-            return cleaned if cleaned else raw_transcript
-    except Exception as e:
-        print(f"[transcriber] Ollama クリーニングエラー（元テキストを使用）: {e}")
-        return raw_transcript  # 失敗時は元テキストをそのまま返す
+    chunks = _chunk_text(raw_transcript, max_chars=3000)
+    cleaned_parts = []
 
-def _summarize_ollama(transcript: str, extra_prompt: str = "") -> str:
-    """
-    Ollamaを使ってローカルで要約する。
-    完全ローカル処理のため音声データは外部に送信されない。
-    """
-    import urllib.request
-    import json
+    for i, chunk in enumerate(chunks):
+        if abort_event and abort_event.is_set():
+            print("[transcriber] クリーニング中断")
+            return raw_transcript
+        if progress_cb:
+            progress_cb(i + 1, len(chunks))
+        print(f"[transcriber] クリーニング {i+1}/{len(chunks)} チャンク...")
+        prompt = (
+            "以下は会議の音声を文字起こしした生テキストです。\n"
+            "挨拶・相槌・フィラー（あー、えーと等）・謝罪の定型文・会議開始終了の定型文を除去し、"
+            "議題・提案・質問・回答・意見・決定事項・数字・固有名詞を含む発言のみ残してください。\n"
+            "除去後のテキストのみ出力してください。\n\n"
+            f"【文字起こし】\n{chunk}"
+        )
+        payload = json.dumps({
+            "model": _get_ollama_model(), "prompt": prompt, "stream": False,
+            "options": {"num_ctx": 4096},
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            "http://127.0.0.1:11434/api/generate", data=payload,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=None) as conn:
+                data    = json.loads(conn.read().decode("utf-8"))
+                cleaned = data.get("response", "").strip()
+                cleaned_parts.append(cleaned if cleaned else chunk)
+        except Exception as e:
+            print(f"[transcriber] クリーニングエラー（チャンク{i+1}）: {e}")
+            cleaned_parts.append(chunk)
 
-    prompt = (
+    result = "\n".join(cleaned_parts)
+    print(f"[transcriber] クリーニング完了: {len(raw_transcript)}字 → {len(result)}字")
+    return result
+
+def _summarize_ollama(transcript: str, extra_prompt: str = "", abort_event=None, progress_cb=None) -> str:
+    """長文対応：チャンクごとに要約してから統合要約"""
+    import urllib.request, json
+
+    if abort_event and abort_event.is_set():
+        return ""
+
+    chunks = _chunk_text(transcript, max_chars=3000)
+
+    # チャンクが1つなら直接要約
+    if len(chunks) == 1:
+        partial_summaries = [transcript]
+    else:
+        # 各チャンクを部分要約
+        partial_summaries = []
+        for i, chunk in enumerate(chunks):
+            if abort_event and abort_event.is_set():
+                return ""
+            if progress_cb:
+                progress_cb(i + 1, len(chunks), final=False)
+            print(f"[transcriber] 部分要約 {i+1}/{len(chunks)} チャンク...")
+            prompt = (
+                "以下は会議の一部分を文字起こしたテキストです。\n"
+                "この部分に含まれる議題・意見・決定事項・アクションアイテムを簡潔にまとめてください。\n"
+                "箇条書き可・300字以内。\n\n"
+                f"【テキスト】\n{chunk}"
+            )
+            payload = json.dumps({
+                "model": _get_ollama_model(), "prompt": prompt, "stream": False,
+                "options": {"num_ctx": 4096},
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                "http://127.0.0.1:11434/api/generate", data=payload,
+                headers={"Content-Type": "application/json"}, method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=None) as conn:
+                    data = json.loads(conn.read().decode("utf-8"))
+                    partial_summaries.append(data.get("response", "").strip() or chunk[:500])
+            except Exception as e:
+                print(f"[transcriber] 部分要約エラー: {e}")
+                partial_summaries.append(chunk[:500])
+
+    # 統合要約
+    if progress_cb:
+        progress_cb(0, 0, final=True)
+    print("[transcriber] 統合要約開始...")
+    combined = "\n\n".join(partial_summaries)
+    final_prompt = (
         "あなたは経験豊富な議事録作成の専門家です。\n"
-        "以下のテキストは実際の会議を録音して文字起こししたものです。\n\n"
-        "この会議の文字起こしには以下のような発言が混在しています：\n"
-        "・参加者からの質問と、それに対する回答\n"
-        "・各参加者の意見・主張・提案\n"
-        "・議題に対する賛成・反対・懸念の表明\n"
-        "・議論を経て生まれた決定や合意\n"
-        "・数字・データ・固有名詞を含む具体的な発言\n\n"
-        "これらの発言の種類を正確に区別し、会議の流れと結論が明確にわかる議事録を作成してください。\n\n"
+        "以下は会議の内容をまとめたテキストです。\n\n"
         "【議事録の形式】\n"
-        "## 会議の概要\n"
-        "（目的・テーマ・参加者・雰囲気を簡潔に）\n\n"
-        "## 議題と議論の内容\n"
-        "（各議題について「提起された問題・意見・質問→回答・議論の流れ→結論」の形で記載）\n\n"
-        "## 決定事項\n"
-        "（会議で合意・決定したことをすべて記載。なければ「特になし」）\n\n"
-        "## アクションアイテム\n"
-        "（誰が・何を・いつまでにするか。なければ「特になし」）\n\n"
-        "## 未解決事項・次回への申し送り\n"
-        "（結論が出なかった議題・継続検討事項。なければ「特になし」）\n\n"
-        "数字・固有名詞・日付・金額は正確に記載してください。\n"
-        "議事録のみを出力してください（前置き・説明文は不要です）。\n\n"
+        "## 会議の概要\n（目的・テーマ・雰囲気を簡潔に）\n\n"
+        "## 議題と議論の内容\n（各議題について提起された問題・意見・結論の流れ）\n\n"
+        "## 決定事項\n（合意・決定したことをすべて。なければ「特になし」）\n\n"
+        "## アクションアイテム\n（誰が・何を・いつまでに。なければ「特になし」）\n\n"
+        "## 未解決事項\n（継続検討事項。なければ「特になし」）\n\n"
+        "数字・固有名詞・日付は正確に記載。議事録のみ出力してください。\n\n"
         + (f"【追加指示】\n{extra_prompt}\n\n" if extra_prompt else "")
-        + f"【会議の文字起こし】\n{transcript}"
+        + f"【会議内容】\n{combined}"
     )
-
     payload = json.dumps({
-        "model":  _get_ollama_model(),
-        "prompt": prompt,
-        "stream": False,
+        "model": _get_ollama_model(), "prompt": final_prompt, "stream": False,
+        "options": {"num_ctx": 8192},
     }).encode("utf-8")
-
     req = urllib.request.Request(
-        "http://127.0.0.1:11434/api/generate",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
+        "http://127.0.0.1:11434/api/generate", data=payload,
+        headers={"Content-Type": "application/json"}, method="POST",
     )
+    with urllib.request.urlopen(req, timeout=None) as conn:
+        data = json.loads(conn.read().decode("utf-8"))
+        result = data.get("response", "").strip()
+    print(f"[transcriber] 要約完了: {len(result)}字")
+    return result
 
-    with urllib.request.urlopen(req, timeout=None) as res:  # タイムアウトなし
-        data = json.loads(res.read().decode("utf-8"))
-        return data.get("response", "").strip()
+def _transcribe_faster_whisper(wav_filename: str, extra_prompt: str = "", record_id: int = None, abort_event=None, progress_callback=None) -> dict:
+    """faster-whisper + Ollama によるローカル処理"""
 
+    def _cb(step, message, progress):
+        if progress_callback:
+            progress_callback(step, message, progress)
 
-def _transcribe_faster_whisper(wav_filename: str, extra_prompt: str = "", record_id: int = None) -> dict:
-    """
-    faster-whisper を使ったローカル文字起こし & LLaMAで要約。
-    GPU(CUDA)が使えれば自動でGPU処理、なければCPU処理にフォールバック。
-    """
     wav_path = UPLOADS_DIR / wav_filename
     if not wav_path.exists():
         return {"status": "error", "message": f"音声ファイルが見つかりません: {wav_filename}"}
@@ -487,23 +518,39 @@ def _transcribe_faster_whisper(wav_filename: str, extra_prompt: str = "", record
             "よく使われる表現：お世話になります、よろしくお願いします、"
             "ありがとうございます、失礼いたします。"
         )
+        _cb("transcribe", "🎙️ 文字起こし中…", 10)
         segments, info = model.transcribe(
             str(wav_path),
             language="ja",
             beam_size=5,
             initial_prompt=initial_prompt,
-            vad_filter=True,       # 無音区間をスキップして高速化
+            vad_filter=True,
             vad_parameters={"min_silence_duration_ms": 500},
         )
         transcript = " ".join([seg.text.strip() for seg in segments]).strip()
         print(f"[transcriber] faster-whisper 文字起こし完了: {len(transcript)}文字 ({info.duration:.1f}秒)")
+        _cb("transcribe_done", f"🎙️ 文字起こし完了（{len(transcript)}文字）", 35)
 
         if not transcript:
             return {"status": "error", "message": "文字起こし結果が空でした（無音または認識できませんでした）"}
 
+        if abort_event and abort_event.is_set():
+            return {"status": "error", "message": "処理が中断されました"}
+
         # ── ② 不要文字列除去（Ollama） ────────────
+        chunks_count = max(1, len(transcript) // 3000 + 1)
+        _cb("cleaning", f"🧹 クリーニング中…（約{chunks_count}ブロック）", 40)
         print("[transcriber] Ollama で不要文字列除去開始")
-        cleaned = _clean_transcript_ollama(transcript)
+
+        def clean_progress(i, total):
+            pct = 40 + int(20 * i / total)
+            _cb("cleaning", f"🧹 クリーニング中… {i}/{total} ブロック", pct)
+
+        cleaned = _clean_transcript_ollama(transcript, abort_event=abort_event, progress_cb=clean_progress)
+        if abort_event and abort_event.is_set():
+            return {"status": "error", "message": "処理が中断されました"}
+        _cb("cleaning_done", "🧹 クリーニング完了", 60)
+
         if record_id:
             try:
                 from app.database import update_cleaned_transcript
@@ -513,13 +560,27 @@ def _transcribe_faster_whisper(wav_filename: str, extra_prompt: str = "", record
         transcript = cleaned
 
         # ── ③ 要約（Ollama ローカル） ─────────────
+        sum_chunks = max(1, len(transcript) // 3000 + 1)
+        _cb("summarizing", f"✨ 要約中…（約{sum_chunks}ブロック）", 65)
         print("[transcriber] Ollama で要約開始（完全ローカル処理）")
+
+        def sum_progress(i, total, final=False):
+            if final:
+                _cb("summarizing", "✨ 統合要約中…", 90)
+            else:
+                pct = 65 + int(20 * i / total)
+                _cb("summarizing", f"✨ 要約中… {i}/{total} ブロック", pct)
+
         try:
-            ai_summary = _summarize_ollama(transcript, extra_prompt)
+            ai_summary = _summarize_ollama(transcript, extra_prompt, abort_event=abort_event, progress_cb=sum_progress)
+            if abort_event and abort_event.is_set():
+                return {"status": "error", "message": "処理が中断されました"}
+            _cb("done", "✅ 完了！", 100)
             print(f"[transcriber] Ollama 要約完了: {len(ai_summary)}文字")
         except Exception as e:
             print(f"[transcriber] Ollama 要約エラー: {e}")
             ai_summary = "（要約に失敗しました。Ollamaが起動しているか確認してください）"
+            _cb("error", f"⚠️ 要約エラー: {e}", 0)
 
         return {
             "status":     "done",

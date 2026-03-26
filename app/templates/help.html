@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>COVE - 取扱説明書</title>
+  <link rel="icon" type="image/x-icon" href="/static/cove.ico">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root { --bg:#0e0e1a; --surface:#1a1a2e; --border:#2e2e4a; --text:#e0e0f0; --muted:#888; --accent:#7C6AF7; --green:#1D9E75; --yellow:#EF9F27; --red:#E24B4A; }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    body { background:var(--bg); color:var(--text); font-family:"Noto Sans JP",sans-serif; font-size:14px; line-height:1.8; }
+    .layout { display:flex; min-height:100vh; }
+    .sidebar { width:260px; flex-shrink:0; background:var(--surface); border-right:1px solid var(--border); padding:24px 0; position:sticky; top:0; height:100vh; overflow-y:auto; }
+    .sidebar-logo { padding:0 20px 20px; border-bottom:1px solid var(--border); margin-bottom:16px; font-size:18px; font-weight:700; color:var(--accent); }
+    .sidebar-logo span { color:var(--muted); font-size:11px; font-weight:400; display:block; margin-top:2px; }
+    .sidebar-nav a { display:block; padding:8px 20px; color:var(--muted); text-decoration:none; font-size:13px; transition:color .15s,background .15s; border-left:2px solid transparent; }
+    .sidebar-nav a:hover { color:var(--text); background:rgba(124,106,247,.08); }
+    .sidebar-nav a.active { color:var(--accent); border-left-color:var(--accent); background:rgba(124,106,247,.08); }
+    .sidebar-nav .section-label { padding:16px 20px 4px; font-size:10px; color:#555; letter-spacing:.08em; text-transform:uppercase; }
+    .main { flex:1; max-width:800px; padding:48px 48px 120px; margin:0 auto; }
+    h1 { font-size:28px; font-weight:700; margin-bottom:8px; }
+    .subtitle { color:var(--muted); font-size:14px; margin-bottom:48px; }
+    h2 { font-size:20px; font-weight:700; margin:48px 0 16px; padding-bottom:10px; border-bottom:1px solid var(--border); }
+    h3 { font-size:15px; font-weight:700; margin:24px 0 10px; color:var(--accent); }
+    p { margin-bottom:12px; }
+    ul,ol { padding-left:20px; margin-bottom:12px; }
+    li { margin-bottom:6px; }
+    a { color:var(--accent); }
+    .code-block { background:#0a0a14; border:1px solid var(--border); border-radius:8px; padding:14px 16px; margin:12px 0; font-family:"Courier New",monospace; font-size:13px; color:#a0f0a0; position:relative; }
+    .copy-btn { position:absolute; top:8px; right:8px; background:var(--border); border:none; color:var(--muted); border-radius:4px; padding:3px 10px; font-size:11px; cursor:pointer; }
+    .copy-btn:hover { background:var(--accent); color:#fff; }
+    .note { border-left:3px solid var(--accent); background:rgba(124,106,247,.08); border-radius:0 6px 6px 0; padding:10px 14px; margin:12px 0; font-size:13px; }
+    .note-ok { border-left-color:var(--green); background:rgba(29,158,117,.08); }
+    .note-warn { border-left-color:var(--yellow); background:rgba(239,159,39,.08); }
+    .note-ng { border-left-color:var(--red); background:rgba(226,75,74,.08); }
+    table { width:100%; border-collapse:collapse; margin:12px 0 20px; font-size:13px; }
+    th { background:var(--surface); padding:8px 12px; text-align:left; border:1px solid var(--border); color:var(--muted); font-weight:600; }
+    td { padding:8px 12px; border:1px solid var(--border); vertical-align:top; }
+    tr:nth-child(even) td { background:rgba(255,255,255,.02); }
+    .os-tabs { display:flex; gap:4px; margin-bottom:0; }
+    .os-tab { padding:6px 16px; border-radius:6px 6px 0 0; border:1px solid var(--border); border-bottom:none; background:var(--surface); color:var(--muted); cursor:pointer; font-size:13px; font-family:inherit; }
+    .os-tab.active { background:#0a0a14; color:var(--text); }
+    .os-content { display:none; }
+    .os-content.active { display:block; }
+    .persona-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:12px 0; }
+    .persona-card { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:12px; }
+    .persona-card .pname { font-weight:700; font-size:13px; }
+    .persona-card .prole { font-size:11px; color:var(--muted); margin-top:2px; }
+    .persona-card .pskill { font-size:12px; margin-top:6px; color:#ccc; }
+    code { background:#1a1a2e; padding:2px 6px; border-radius:4px; }
+    @media(max-width:900px){ .sidebar{display:none;} .main{padding:24px 20px 80px;} .persona-grid{grid-template-columns:1fr;} }
+  </style>
+</head>
+<body>
+<div class="layout">
+  <nav class="sidebar">
+    <div class="sidebar-logo">📖 COVE<span>取扱説明書</span></div>
+    <div class="sidebar-nav">
+      <div class="section-label">はじめに</div>
+      <a href="#about">COVEとは</a>
+      <a href="#requirements">システム要件</a>
+      <div class="section-label">セットアップ</div>
+      <a href="#before-start">はじめる前に</a>
+      <a href="#install-uv">Step 1: uv</a>
+      <a href="#install-ollama">Step 2: Ollama</a>
+      <a href="#install-model">Step 3: AIモデル</a>
+      <a href="#install-ffmpeg">Step 4: ffmpeg</a>
+      <a href="#install-cove">Step 5: COVE</a>
+      <div class="section-label">使い方</div>
+      <a href="#usage-start">起動・終了</a>
+      <a href="#usage-record">録音画面</a>
+      <a href="#usage-vault">保管庫</a>
+      <a href="#usage-council">相談室</a>
+      <a href="#usage-settings">設定画面</a>
+      <div class="section-label">活用のコツ</div>
+      <a href="#tips-persona">ペルソナ設定</a>
+      <a href="#tips-vault">保管庫活用</a>
+      <div class="section-label">困ったときは</div>
+      <a href="#trouble">トラブルシューティング</a>
+      <a href="#trouble-ollama">Ollamaが起動しない</a>
+      <a href="#trouble-model">モデルが見つからない</a>
+      <a href="#trouble-ffmpeg">ffmpegエラー</a>
+      <div class="section-label">その他</div>
+      <a href="#privacy">プライバシー</a>
+    </div>
+  </nav>
+  <main class="main">
+    <h1>COVE by AURA</h1>
+    <p class="subtitle">セットアップ &amp; 操作ガイド ― 役職者向け意思決定支援ツール</p>
+    <div class="note note-ok">✅ 本ドキュメントはWindows・Mac両対応のセットアップ手順と操作方法を説明します。</div>
+
+    <h2 id="about">1. COVEとは</h2>
+    <p>COVEは、役職者の意思決定を多角的な視点からサポートするローカルAIツールです。すべての処理がPC上で完結するため、機密性の高い情報を外部に送信することなく利用できます。</p>
+    <ul>
+      <li>🎙️ <strong>録音・文字起こし</strong>：会議や打ち合わせを録音し、AIが自動で文字起こし・要約</li>
+      <li>🗄️ <strong>保管庫</strong>：テキストメモ・ファイル・Webデータ・録音データを一元管理</li>
+      <li>💬 <strong>相談室</strong>：8人のAIペルソナが多角的な視点から意見を提示</li>
+      <li>⚙️ <strong>設定</strong>：ペルソナのカスタマイズ・カテゴリ管理</li>
+    </ul>
+    <div class="note note-ok">✅ COVEは完全ローカル動作のため、インターネット接続は初期セットアップ時のダウンロードのみに使用します。</div>
+
+    <h2 id="requirements">2. システム要件</h2>
+    <h3>■ Windows</h3>
+    <table>
+      <tr><th>項目</th><th>最小要件</th><th>推奨</th></tr>
+      <tr><td>OS</td><td>Windows 10 64bit</td><td>Windows 11</td></tr>
+      <tr><td>RAM</td><td>16GB</td><td>32GB以上</td></tr>
+      <tr><td>VRAM</td><td>8GB</td><td>16GB以上</td></tr>
+      <tr><td>ストレージ</td><td>30GB以上</td><td>50GB以上</td></tr>
+      <tr><td>その他</td><td>インターネット接続（初回のみ）</td><td>NVIDIA GPU（CUDA対応）</td></tr>
+    </table>
+    <h3>■ Mac</h3>
+    <table>
+      <tr><th>項目</th><th>最小要件</th><th>推奨</th></tr>
+      <tr><td>チップ</td><td>Apple Silicon（M1以降）</td><td>M5 Pro以降</td></tr>
+      <tr><td>RAM</td><td>16GB</td><td>36GB以上</td></tr>
+      <tr><td>ストレージ</td><td>30GB以上</td><td>50GB以上</td></tr>
+      <tr><td>OS</td><td>macOS 13 Ventura以降</td><td>最新版</td></tr>
+    </table>
+    <div class="note">ℹ️ MacはApple SiliconのUnified Memory（統合メモリ）を活用するため、16GB RAMでもWindowsの16GB VRAMと同等以上の性能が得られます。</div>
+
+    <h2 id="install-uv">3. インストール手順</h2>
+
+    <div class="note note-ok" id="before-start" style="margin-bottom:24px;">
+      <strong>📋 はじめる前に ― コマンドラインツールについて</strong>
+    </div>
+
+    <p>セットアップでは <strong>コマンドラインツール</strong> を使います。コマンドと呼ばれる命令文を入力してPCを操作するツールです。難しそうに見えますが、このページのコマンドを<strong>コピーして貼り付けてEnterを押すだけ</strong>でOKです。</p>
+
+    <h3>■ コマンドラインツールの開き方</h3>
+    <div class="os-tabs">
+      <button class="os-tab active" onclick="switchOS(this,'cli')">Windows</button>
+      <button class="os-tab" onclick="switchOS(this,'cli')">Mac</button>
+    </div>
+    <div id="cli-0" class="os-content active">
+      <ol>
+        <li>画面左下の <strong>スタートボタンを右クリック</strong></li>
+        <li>メニューから <strong>「PowerShell」</strong> または <strong>「ターミナル」</strong> をクリック</li>
+        <li>黒い画面（またはウィンドウ）が開いたら準備完了</li>
+      </ol>
+      <div class="note">ℹ️ 「管理者として実行」が必要な場合は、右クリックメニューから「Windows PowerShell（管理者）」を選んでください。</div>
+    </div>
+    <div id="cli-1" class="os-content">
+      <ol>
+        <li>キーボードの <strong>Cmd（⌘）+ Space</strong> を押してSpotlight検索を開く</li>
+        <li><strong>「Terminal」</strong> と入力してEnterを押す</li>
+        <li>白または黒いウィンドウが開いたら準備完了</li>
+      </ol>
+      <div class="note">ℹ️ LaunchpadのToolsフォルダ内にもTerminalがあります。</div>
+    </div>
+
+    <h3>■ コマンドの実行方法</h3>
+    <ol>
+      <li>このページの <strong>「コピー」ボタン</strong> を押してコマンドをコピー</li>
+      <li>PowerShell / Terminal のウィンドウをクリックしてアクティブにする</li>
+      <li><strong>Ctrl+V（Windows）</strong> または <strong>Cmd+V（Mac）</strong> で貼り付ける</li>
+      <li><strong>Enterキー</strong> を押して実行</li>
+      <li>処理が完了するまで待つ（完了すると新しい入力行が表示される）</li>
+    </ol>
+    <div class="note note-warn">⚠️ コマンドの実行中はウィンドウを閉じないでください。処理が途中で止まってしまいます。</div>
+
+    <h3 id="install-uv">■ Step 1: uvのインストール</h3>
+    <div class="os-tabs">
+      <button class="os-tab active" onclick="switchOS(this,'uv')">Windows</button>
+      <button class="os-tab" onclick="switchOS(this,'uv')">Mac</button>
+    </div>
+    <div id="uv-0" class="os-content active">
+      <div class="code-block">winget install --id=astral-sh.uv -e<button class="copy-btn" onclick="copyCode(this)">コピー</button></div>
+    </div>
+    <div id="uv-1" class="os-content">
+      <div class="code-block">curl -LsSf https://astral.sh/uv/install.sh | sh<button class="copy-btn" onclick="copyCode(this)">コピー</button></div>
+      <p>インストール後、Terminalを再起動してください。</p>
+    </div>
+
+    <h3 id="install-ollama">■ Step 2: Ollamaのインストール</h3>
+    <p>Ollamaはローカルでアシスタントを動かすためのソフトウェアです。</p>
+    <div class="os-tabs">
+      <button class="os-tab active" onclick="switchOS(this,'ollama')">Windows</button>
+      <button class="os-tab" onclick="switchOS(this,'ollama')">Mac</button>
+    </div>
+    <div id="ollama-0" class="os-content active">
+      <ol>
+        <li><a href="https://ollama.com/download" target="_blank">https://ollama.com/download</a> にアクセス</li>
+        <li>「Download for Windows」をクリックしてダウンロード</li>
+        <li>ダウンロードした .exe ファイルを実行してインストール</li>
+      </ol>
+    </div>
+    <div id="ollama-1" class="os-content">
+      <div class="code-block">brew install ollama<button class="copy-btn" onclick="copyCode(this)">コピー</button></div>
+      <p>Homebrewがない場合は <a href="https://brew.sh" target="_blank">https://brew.sh</a> からインストールしてください。</p>
+    </div>
+    <div class="note note-ok">✅ インストール後、<code>ollama --version</code> と打って、バージョン番号が表示されれば成功です。</div>
+
+    <h3 id="install-model">■ Step 3: AIモデルのダウンロード</h3>
+    <p>COVEで使用するAIモデルをダウンロードします。約17GBあるため、安定したインターネット環境で行ってください。</p>
+    <div class="code-block">ollama pull gemma3:27b<button class="copy-btn" onclick="copyCode(this)">コピー</button></div>
+    <div class="note note-warn">⚠️ ダウンロードには30分〜2時間程度かかります。完了するまでウィンドウを閉じないでください。</div>
+
+    <h3 id="install-ffmpeg">■ Step 4: ffmpegのインストール（トリミング機能用）</h3>
+    <div class="os-tabs">
+      <button class="os-tab active" onclick="switchOS(this,'ffmpeg')">Windows</button>
+      <button class="os-tab" onclick="switchOS(this,'ffmpeg')">Mac</button>
+    </div>
+    <div id="ffmpeg-0" class="os-content active">
+      <div class="code-block">winget install ffmpeg<button class="copy-btn" onclick="copyCode(this)">コピー</button></div>
+    </div>
+    <div id="ffmpeg-1" class="os-content">
+      <div class="code-block">brew install ffmpeg<button class="copy-btn" onclick="copyCode(this)">コピー</button></div>
+    </div>
+    <div class="note">ℹ️ ffmpegは録音のトリミング機能を使う場合のみ必要です。録音・文字起こし・相談機能はffmpegなしでも利用できます。</div>
+
+    <h3 id="install-cove">■ Step 5: COVEのセットアップ</h3>
+    <div class="code-block">cd cove-by-aura<br>uv sync<button class="copy-btn" onclick="copyCode(this)">コピー</button></div>
+    <div class="note">ℹ️「uv sync」は初回のみ必要です。以後は起動コマンドのみでOKです。</div>
+
+    <h2 id="usage-start">4. 起動・終了方法</h2>
+    <h3>■ 起動</h3>
+    <div class="code-block">cd cove-by-aura<br>uv run python main.py<button class="copy-btn" onclick="copyCode(this)">コピー</button></div>
+    <p>起動後、ブラウザが自動で開きます。開かない場合は <code>http://127.0.0.1:5001</code> にアクセスしてください。</p>
+    <div class="note note-warn">⚠️ コマンドラインウィンドウを閉じないでください。閉じるとCOVEが終了します。</div>
+    <h3>■ 終了</h3>
+    <p>画面右上の「⏻ 終了」ボタンをクリックします。</p>
+    <div class="note note-warn">⚠️ ブラウザのタブを閉じるだけではCOVEは終了しません。必ず「終了」ボタンを使用してください。</div>
+
+    <h2 id="usage-record">5. 画面の使い方</h2>
+    <h3>■ 🎙️ 録音画面</h3>
+    <ol>
+      <li>「録音開始」ボタンを押して録音を開始</li>
+      <li>録音が終わったら「録音停止」ボタンを押す</li>
+      <li>自動で文字起こし → クリーニング → 要約が実行される</li>
+      <li>完了後、テキストを確認・保存</li>
+    </ol>
+    <h3>手動トリミング</h3>
+    <ol>
+      <li>録音一覧の「✂️ トリミング」ボタンをクリック</li>
+      <li>波形を見ながら開始・終了スライダーで範囲を指定</li>
+      <li>「▶ 再生」または「✂️ 範囲のみ再生」で確認</li>
+      <li>「✂️ トリミング実行」で上書き保存</li>
+    </ol>
+
+    <h3 id="usage-vault">■ 🗄️ 保管庫</h3>
+    <ul>
+      <li><strong>テキストメモ</strong>：自由にメモを入力。利用者情報カテゴリは常に相談に参照される</li>
+      <li><strong>ファイル</strong>：PDFや文書ファイルをアップロードしてAIが要約</li>
+      <li><strong>Webデータ</strong>：URLを入力して参考ページの内容を取得</li>
+      <li><strong>録音データ</strong>：録音済みの音声を追加してテキスト化</li>
+    </ul>
+
+    <h3 id="usage-council">■ 💬 相談室</h3>
+    <ol>
+      <li>カテゴリを選択して相談内容を入力</li>
+      <li>「相談する」ボタンを押す</li>
+      <li>8人のペルソナが順番に意見を述べる</li>
+      <li>採用したい回答の「採用する」ボタンを押す</li>
+      <li>「相談終了」で終了し、最終判断メモを入力して保存</li>
+    </ol>
+    <div class="note">ℹ️ 採用した回答に★評価をつけると、次回の相談でそのペルソナがより精度の高い回答をするようになります。</div>
+
+    <h3 id="usage-settings">■ ⚙️ 設定画面</h3>
+    <ul>
+      <li>ペルソナ名またはアイコンをクリック → 編集ポップアップが開く</li>
+      <li>アイコンは待機用・考え中用の2種類を設定可能</li>
+      <li>システムプロンプトを変更するとAIの回答スタイルが変わる</li>
+    </ul>
+    <div class="note note-ng">🚫 デンジャーゾーン：録音・メモ・ファイル・Webデータ・相談履歴の全削除が可能です。取り消せないため慎重に操作してください。</div>
+
+    <h2 id="tips-persona">6. 活用のコツ</h2>
+    <h3>■ 効果的なプロンプトの3原則</h3>
+    <p><strong>① 役割を断言する</strong></p>
+    <p>❌ 悪い例：あなたは財務の専門家です。<br>
+    ✅ 良い例：あなたは財務の専門家だ。数字以外の主張は一切信じない。</p>
+    <p><strong>② 「禁止事項」を明記する</strong></p>
+    <div class="code-block">【禁止】感情的表現・アイデア提案・戦略提案・リスク警告・300字超過</div>
+    <p><strong>③ 出力フォーマットを固定する</strong></p>
+    <div class="code-block">【出力形式・厳守】<br>📊 判定：（論理的結論を一文）<br>📊 根拠①：（事実・数値・因果関係）<br>📊 根拠②：（事実・数値・因果関係）</div>
+
+    <h3>■ デフォルト8ペルソナの特性</h3>
+    <div class="persona-grid">
+      <div class="persona-card"><div class="pname">▶ 戦略家</div><div class="prole">攻撃的・勝ちにいく</div><div class="pskill">勝ち筋・具体的な行動方針</div></div>
+      <div class="persona-card"><div class="pname">⚠ リスク管理者</div><div class="prole">保守的・問題指摘</div><div class="pskill">落とし穴の発見・最悪シナリオ</div></div>
+      <div class="persona-card"><div class="pname">📊 アナリスト</div><div class="prole">データ・客観的分析</div><div class="pskill">構造的判定・根拠の整理</div></div>
+      <div class="persona-card"><div class="pname">💡 クリエイター</div><div class="prole">発想力・斬新アイデア</div><div class="pskill">誰もやっていないアイデア</div></div>
+      <div class="persona-card"><div class="pname">⚖ 法務・コンプラ</div><div class="prole">規則・法的観点</div><div class="pskill">法的リスク・適法な代替案</div></div>
+      <div class="persona-card"><div class="pname">👤 ユーザー視点</div><div class="prole">現場・顧客目線</div><div class="pskill">第一印象・離脱ポイント</div></div>
+      <div class="persona-card"><div class="pname">🔥 クレーマー</div><div class="prole">批判・欠点指摘</div><div class="pskill">致命的欠陥・矛盾の発見</div></div>
+      <div class="persona-card"><div class="pname">📣 マーケッター</div><div class="prole">市場・ブランド戦略</div><div class="pskill">売れる/売れない判定・差別化</div></div>
+    </div>
+
+    <h3 id="tips-vault">■ 保管庫の活用ポイント</h3>
+    <ul>
+      <li>「利用者情報」カテゴリに自分の役職・業界・状況を詳しく登録する（相談精度が大幅に上がる）</li>
+      <li>相談テーマに関連するWebページやドキュメントを事前に保管庫に登録する</li>
+      <li>過去の会議録音を要約して保管しておく</li>
+    </ul>
+    <div class="note note-ok">✅ 保管庫の情報が充実するほど、ペルソナの回答が具体的・的確になります。</div>
+
+    <h2 id="trouble">7. トラブルシューティング</h2>
+    <h3>■ 起動できない</h3>
+    <p><strong>「uvが見つかりません」</strong>：Step 1のuvインストールを確認し、PowerShell/Terminalを再起動してください。</p>
+    <p><strong>ブラウザが開かない</strong>：手動で <code>http://127.0.0.1:5001</code> にアクセスしてください。</p>
+
+    <h3 id="trouble-ollama">■ Ollamaが起動しない</h3>
+    <div class="os-tabs">
+      <button class="os-tab active" onclick="switchOS(this,'ot')">Windows</button>
+      <button class="os-tab" onclick="switchOS(this,'ot')">Mac</button>
+    </div>
+    <div id="ot-0" class="os-content active">
+      <ul>
+        <li>タスクマネージャーで「ollama.exe」が動いているか確認</li>
+        <li>動いていない場合はスタートメニューから「Ollama」を起動</li>
+      </ul>
+    </div>
+    <div id="ot-1" class="os-content">
+      <ul>
+        <li>メニューバーにOllamaのアイコンがあるか確認</li>
+        <li>ない場合はApplicationsフォルダからOllamaを起動</li>
+        <li>またはTerminalで <code>ollama serve</code> を実行</li>
+      </ul>
+    </div>
+
+    <h3 id="trouble-model">■ AIモデルが見つからない</h3>
+    <p>以下のコマンドでモデルをダウンロードしてください。</p>
+    <div class="code-block">ollama pull gemma3:27b<button class="copy-btn" onclick="copyCode(this)">コピー</button></div>
+    <p>VRAMが不足する場合は小さいモデルをお試しください。</p>
+    <div class="code-block">ollama pull gemma3:12b<button class="copy-btn" onclick="copyCode(this)">コピー</button></div>
+
+    <h3 id="trouble-ffmpeg">■ ffmpegが見つからない（トリミングエラー）</h3>
+    <div class="os-tabs">
+      <button class="os-tab active" onclick="switchOS(this,'ft')">Windows</button>
+      <button class="os-tab" onclick="switchOS(this,'ft')">Mac</button>
+    </div>
+    <div id="ft-0" class="os-content active">
+      <div class="code-block">winget install ffmpeg<button class="copy-btn" onclick="copyCode(this)">コピー</button></div>
+    </div>
+    <div id="ft-1" class="os-content">
+      <div class="code-block">brew install ffmpeg<button class="copy-btn" onclick="copyCode(this)">コピー</button></div>
+    </div>
+    <p>インストール後、COVEを再起動してください。</p>
+
+    <h3>■ 録音できない（マイクが認識されない）</h3>
+    <ul>
+      <li>OSの設定でマイクへのアクセスを許可する</li>
+      <li>録音画面を再読み込みする（Ctrl+R / Cmd+R）</li>
+    </ul>
+    <h3>■ Mac：システム音声が録音できない</h3>
+    <ol>
+      <li><a href="https://existential.audio/blackhole/" target="_blank">https://existential.audio/blackhole/</a> からBlackHoleをダウンロード・インストール</li>
+      <li>COVEを再起動する</li>
+    </ol>
+
+    <h2 id="privacy">8. プライバシー・ライセンス</h2>
+    <div class="note note-ok">✅ COVEはすべての処理をPC上でローカルに実行します。入力した情報・録音データ・相談内容は外部サーバーに送信されません。</div>
+    <h3>■ データの保存場所</h3>
+    <ul>
+      <li>データベース：<code>cove-by-aura/app/cove.db</code></li>
+      <li>録音ファイル：<code>cove-by-aura/uploads/</code></li>
+      <li>設定ファイル：<code>cove-by-aura/.env</code></li>
+    </ul>
+    <h3>■ 使用しているOSSライセンス</h3>
+    <table>
+      <tr><th>ソフトウェア</th><th>ライセンス</th><th>用途</th></tr>
+      <tr><td>Flask</td><td>BSD License</td><td>Webサーバー</td></tr>
+      <tr><td>faster-whisper</td><td>MIT License</td><td>音声文字起こし</td></tr>
+      <tr><td>Ollama</td><td>MIT License</td><td>ローカルLLM実行</td></tr>
+      <tr><td>SQLite</td><td>Public Domain</td><td>データベース</td></tr>
+      <tr><td>ffmpeg</td><td>LGPL / GPL</td><td>音声トリミング</td></tr>
+    </table>
+    <div class="note note-warn">⚠️ AIの回答は誤りを含む場合があります。最終判断は必ず人間が行ってください。</div>
+  </main>
+</div>
+<script>
+function switchOS(btn, group) {
+  const tabs = btn.parentElement.querySelectorAll(".os-tab");
+  const idx = [...tabs].indexOf(btn);
+  tabs.forEach(t => t.classList.remove("active"));
+  btn.classList.add("active");
+  let next = btn.parentElement.nextElementSibling;
+  let i = 0;
+  while(next && next.classList.contains("os-content")) {
+    next.classList.toggle("active", i === idx);
+    next = next.nextElementSibling;
+    i++;
+  }
+}
+function copyCode(btn) {
+  const text = [...btn.parentElement.childNodes]
+    .filter(n => n.nodeType === 3)
+    .map(n => n.textContent)
+    .join("\n").trim();
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = "✓ コピー済";
+    setTimeout(() => btn.textContent = "コピー", 2000);
+  });
+}
+const links = document.querySelectorAll(".sidebar-nav a");
+const obs = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if(e.isIntersecting) {
+      links.forEach(l => l.classList.remove("active"));
+      const l = document.querySelector(`.sidebar-nav a[href="#${e.target.id}"]`);
+      if(l) l.classList.add("active");
+    }
+  });
+}, { rootMargin: "-20% 0px -70% 0px" });
+document.querySelectorAll("h2[id],h3[id]").forEach(el => obs.observe(el));
+</script>
+</body>
+</html>

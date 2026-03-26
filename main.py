@@ -7,6 +7,7 @@ from pathlib import Path
 from flask import Flask, jsonify, render_template, request, send_from_directory
 
 from app.database import (
+    get_connection,
     create_recording,
     delete_recording,
     delete_all_recordings,
@@ -33,10 +34,16 @@ from app.database import (
     # Phase 3
     get_all_persona_settings,
     update_persona_enabled,
+    create_persona,
+    update_persona,
+    delete_persona,
     create_council_session,
     update_council_session_decision,
     create_council_adopted,
     get_council_sessions,
+    update_adopted_rating,
+    get_highly_rated_answers,
+    delete_council_session,
     get_context_for_category,
 )
 from app.services.recorder import delete_recording as delete_wav
@@ -129,9 +136,44 @@ def categories_delete(category_id):
 
 @app.route("/api/categories/<int:category_id>/recordings", methods=["DELETE"])
 def categories_delete_recordings(category_id):
-    """指定カテゴリの録音データを全削除する"""
+    """指定カテゴリの録音データを全削除する（後方互換）"""
     count = delete_recordings_by_category(category_id)
     return jsonify({"status": "ok", "deleted": count}), 200
+
+
+@app.route("/api/categories/<int:category_id>/data", methods=["DELETE"])
+def categories_delete_all_data(category_id):
+    """指定カテゴリの録音・メモ・ファイル・Webデータをすべて削除する"""
+    import os
+    deleted = {"recordings": 0, "memos": 0, "files": 0}
+
+    # 録音データ削除
+    all_records = get_all_recordings(category_id=category_id)
+    for r in all_records:
+        if r.get("wav_file"):
+            delete_wav(r["wav_file"])
+        delete_recording(r["id"])
+        deleted["recordings"] += 1
+
+    # メモ削除
+    with get_connection() as conn:
+        rows = conn.execute("SELECT id FROM vault_memos WHERE category_id=?", (category_id,)).fetchall()
+        for row in rows:
+            conn.execute("DELETE FROM vault_memos WHERE id=?", (row["id"],))
+            deleted["memos"] += 1
+        # ファイル削除
+        frows = conn.execute("SELECT id, filename FROM vault_files WHERE category_id=?", (category_id,)).fetchall()
+        for row in frows:
+            fpath = RESOURCE_DIR / "uploads" / row["filename"]
+            if fpath.exists():
+                fpath.unlink()
+            conn.execute("DELETE FROM vault_files WHERE id=?", (row["id"],))
+            deleted["files"] += 1
+        conn.commit()
+
+    total = sum(deleted.values())
+    print(f"[data] カテゴリ{category_id}のデータ削除: {deleted}")
+    return jsonify({"status": "ok", "deleted": total, "detail": deleted}), 200
 
 
 @app.route("/api/recordings/<int:record_id>/category", methods=["PUT"])
@@ -144,16 +186,18 @@ def recording_update_category(record_id):
 
 @app.route("/api/shutdown", methods=["POST"])
 def shutdown():
-    """AURAを終了する"""
+    """COVEを終了する"""
     import threading
     def _shutdown():
-        import time, os, signal, subprocess
-        time.sleep(0.3)  # レスポンスを返してから終了
+        import time, os, signal, subprocess, platform
+        time.sleep(0.3)
         print("[main] シャットダウン要求を受信しました")
-        # AURAが起動したOllamaを停止
         try:
-            subprocess.run(["taskkill", "/F", "/IM", "ollama.exe"],
-                         capture_output=True)
+            if platform.system() == "Windows":
+                subprocess.run(["taskkill", "/F", "/IM", "ollama.exe"], capture_output=True)
+            else:
+                # Mac/Linux: pkill or killall
+                subprocess.run(["pkill", "-f", "ollama"], capture_output=True)
             print("[main] Ollamaを停止しました")
         except Exception as e:
             print(f"[main] Ollama停止エラー: {e}")
@@ -161,11 +205,34 @@ def shutdown():
     threading.Thread(target=_shutdown, daemon=True).start()
     return jsonify({"status": "ok"}), 200
 
+@app.route("/api/disk/status", methods=["GET"])
+def disk_status():
+    """ディスクの空き容量を返す"""
+    import shutil
+    try:
+        usage = shutil.disk_usage(str(BASE_DIR))
+        return jsonify({
+            "total": usage.total,
+            "used":  usage.used,
+            "free":  usage.free,
+            "free_gb":  round(usage.free  / (1024**3), 1),
+            "total_gb": round(usage.total / (1024**3), 1),
+            "percent_used": round(usage.used / usage.total * 100, 1),
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/help")
+def help_page():
+    return render_template("help.html")
+
+
 @app.route("/favicon.ico")
 def favicon():
     return send_from_directory(
         str(BASE_DIR / "app" / "static"),
-        "aura.ico",
+        "cove.ico",
         mimetype="image/x-icon"
     )
 
@@ -184,13 +251,153 @@ def index():
 
 VAULT_DIR = BASE_DIR / "vault"
 VAULT_DIR.mkdir(exist_ok=True)
-_file_summarize_status = {"status": "idle", "message": ""}
+_file_summarize_status   = {"status": "idle", "message": ""}
+_recording_upload_status = {"status": "idle", "message": "", "progress": 0, "step": ""}
+_transcribe_progress     = {"status": "idle", "step": "", "message": "", "progress": 0, "elapsed": 0, "record_id": None}
+_transcribe_start_time   = 0
+
+@app.route("/api/transcribe/progress", methods=["GET"])
+def transcribe_progress():
+    """文字起こし・クリーニング・要約の進捗を返す"""
+    p = dict(_transcribe_progress)
+    if _transcribe_start_time > 0:
+        import time as _time
+        p["elapsed"] = int(_time.time() - _transcribe_start_time)
+    return jsonify(p), 200
+
+# ── Ollama処理の中断管理 ──────────────────────────────
+import threading as _threading
+_ollama_abort_events: dict[str, "_threading.Event"] = {}  # task_key -> Event
+
+def _new_abort_event(task_key: str) -> "_threading.Event":
+    """新しい中断イベントを作成・登録して返す"""
+    ev = _threading.Event()
+    _ollama_abort_events[task_key] = ev
+    return ev
+
+def abort_ollama_task(task_key: str):
+    """指定タスクの中断イベントをセットする"""
+    ev = _ollama_abort_events.get(task_key)
+    if ev:
+        ev.set()
+        print(f"[ollama] 中断リクエスト: {task_key}")
+
+@app.route("/api/ollama/abort", methods=["POST"])
+def ollama_abort():
+    """実行中のOllama処理を中断する"""
+    data     = request.get_json(silent=True) or {}
+    task_key = data.get("task_key", "")
+    if task_key:
+        abort_ollama_task(task_key)
+    else:
+        # task_key未指定なら全タスクを中断
+        for key in list(_ollama_abort_events.keys()):
+            abort_ollama_task(key)
+    return jsonify({"status": "ok"}), 200
+
 
 @app.route("/api/vault/files/status", methods=["GET"])
 def vault_file_status():
     return jsonify(_file_summarize_status), 200
 
+@app.route("/api/vault/recording/status", methods=["GET"])
+def vault_recording_status():
+    return jsonify(_recording_upload_status), 200
+
 ALLOWED_EXTENSIONS = {".pdf", ".docx", ".xlsx", ".pptx", ".txt", ".md"}
+ALLOWED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".ogg", ".flac", ".webm"}
+
+
+@app.route("/api/vault/recording/upload", methods=["POST"])
+def vault_recording_upload():
+    """保管庫から録音ファイルをアップロードして文字起こし・要約を実施する"""
+    global _recording_upload_status
+
+    if "file" not in request.files:
+        return jsonify({"status": "error", "message": "ファイルが選択されていません"}), 400
+
+    file        = request.files["file"]
+    title       = request.form.get("title", "").strip() or file.filename
+    memo        = request.form.get("memo", "").strip()
+    category_id = int(request.form.get("category_id", 1) or 1)
+
+    suffix = Path(file.filename).suffix.lower()
+    if suffix not in ALLOWED_AUDIO_EXTENSIONS:
+        return jsonify({"status": "error", "message": f"対応形式: {', '.join(ALLOWED_AUDIO_EXTENSIONS)}"}), 400
+
+    # WAVとして保存（mp3等はffmpegで変換が必要だがまずwavで保存）
+    import uuid, shutil
+    UPLOADS_DIR.mkdir(exist_ok=True)
+    unique_name = f"vault_{uuid.uuid4().hex}{suffix}"
+    save_path   = UPLOADS_DIR / unique_name
+    file.save(str(save_path))
+
+    # mp3/m4a等はwavに変換
+    wav_path = save_path
+    if suffix != ".wav":
+        try:
+            import subprocess
+            wav_name = save_path.with_suffix(".wav").name
+            wav_path = UPLOADS_DIR / wav_name
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", str(save_path), str(wav_path)],
+                check=True, capture_output=True, timeout=120
+            )
+            save_path.unlink(missing_ok=True)
+        except Exception:
+            wav_path = save_path  # 変換失敗時はそのまま使用
+
+    # DBにレコード作成
+    record_id = create_recording(str(wav_path.name), title, memo, category_id)
+    abort_ev  = _new_abort_event(f"rec_{record_id}")
+
+    def _process():
+        global _recording_upload_status
+        try:
+            if abort_ev.is_set():
+                _recording_upload_status = {"status": "idle", "message": "中断されました", "progress": 0, "step": ""}
+                return
+            _recording_upload_status = {"status": "running", "message": "文字起こし中…", "progress": 10, "step": "transcribe"}
+            from app.services.transcriber import transcribe_and_summarize
+            result = transcribe_and_summarize(wav_path.name, "", record_id, abort_event=abort_ev)
+
+            if abort_ev.is_set():
+                _recording_upload_status = {"status": "idle", "message": "中断されました", "progress": 0, "step": ""}
+                return
+
+            if result["status"] == "error":
+                _recording_upload_status = {
+                    "status": "error",
+                    "message": f"文字起こしに失敗しました: {result.get('message', '')}",
+                    "progress": 0, "step": "error"
+                }
+                return
+
+            _recording_upload_status = {"status": "running", "message": "クリーニング・要約完了", "progress": 90, "step": "summary"}
+
+            update_transcript_and_summary(record_id, result["transcript"], result["ai_summary"])
+            if result.get("cleaned_transcript"):
+                from app.database import update_cleaned_transcript
+                update_cleaned_transcript(record_id, result["cleaned_transcript"])
+
+            _recording_upload_status = {
+                "status": "done",
+                "message": f"完了：{title}",
+                "progress": 100,
+                "step": "done",
+                "record_id": record_id,
+            }
+
+        except Exception as e:
+            _recording_upload_status = {
+                "status": "error",
+                "message": f"処理中にエラーが発生しました: {str(e)}",
+                "progress": 0, "step": "error"
+            }
+
+    _recording_upload_status = {"status": "running", "message": "アップロード完了。処理を開始します…", "progress": 5, "step": "start"}
+    threading.Thread(target=_process, daemon=True).start()
+    return jsonify({"status": "ok", "record_id": record_id}), 200
 
 
 @app.route("/api/vault/memos", methods=["GET"])
@@ -256,6 +463,8 @@ def vault_files_upload():
     file_id = create_vault_file(filename, file.filename, ext, category_id)
 
     # バックグラウンドでOllama要約
+    abort_ev = _new_abort_event(f"file_{file_id}")
+
     def _summarize():
         global _file_summarize_status
         try:
@@ -265,10 +474,13 @@ def vault_files_upload():
                 update_vault_file_summary(file_id, "（テキストを抽出できませんでした）")
                 _file_summarize_status = {"status": "done", "message": "完了"}
                 return
-            # 短すぎるテキストはそのまま保存（AIが余計な言い換えをしないよう）
             if len(text) < 200:
                 update_vault_file_summary(file_id, text)
                 _file_summarize_status = {"status": "done", "message": f"完了: {file.filename}"}
+                return
+
+            if abort_ev.is_set():
+                _file_summarize_status = {"status": "idle", "message": "中断されました"}
                 return
 
             _file_summarize_status = {"status": "summarizing", "message": f"Ollamaで整形中: {file.filename}"}
@@ -295,9 +507,17 @@ def vault_files_upload():
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            with _ureq2.urlopen(_req2, timeout=None) as _res2:
-                _result2 = _json2.loads(_res2.read().decode("utf-8"))
+            _conn2 = _ureq2.urlopen(_req2, timeout=300)
+            try:
+                if abort_ev.is_set():
+                    _conn2.close()
+                    _file_summarize_status = {"status": "idle", "message": "中断されました"}
+                    return
+                _result2 = _json2.loads(_conn2.read().decode("utf-8"))
                 summary  = _result2.get("response", "").strip() or text
+            finally:
+                _conn2.close()
+
             update_vault_file_summary(file_id, summary)
             print(f"[vault] ファイル要約完了: {file.filename}")
             _file_summarize_status = {"status": "done", "message": f"完了: {file.filename}"}
@@ -410,7 +630,12 @@ def vault_web_analyze():
         parsed_base = _parse.urlparse(url)
         base_domain = parsed_base.scheme + "://" + parsed_base.netloc
 
-        headers  = {"User-Agent": "Mozilla/5.0 (compatible; COVE-bot/1.0)"}
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+            "Accept-Encoding": "gzip, deflate",
+        }
         req      = _req.Request(url, headers=headers)
         with _req.urlopen(req, timeout=15) as res:
             raw      = res.read()
@@ -495,7 +720,12 @@ def vault_web_fetch():
                 }
 
                 # ページ取得
-                headers = {"User-Agent": "Mozilla/5.0 (compatible; COVE-bot/1.0)"}
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+                    "Accept-Encoding": "gzip, deflate",
+                }
                 req     = _req.Request(url, headers=headers)
                 with _req.urlopen(req, timeout=15) as res:
                     raw     = res.read()
@@ -652,12 +882,11 @@ def record_status():
 
 @app.route("/api/transcribe", methods=["POST"])
 def transcribe():
-    """
-    文字起こしと要約を実行してDBに保存する。
-    Request JSON: {"record_id": int}
-    Response: {"status": "done", "transcript": str, "ai_summary": str}
-    """
-    data = request.get_json(silent=True) or {}
+    """文字起こしと要約を実行してDBに保存する"""
+    global _transcribe_progress, _transcribe_start_time
+    import time as _time
+
+    data      = request.get_json(silent=True) or {}
     record_id = data.get("record_id")
 
     if not record_id:
@@ -667,20 +896,27 @@ def transcribe():
     if not record:
         return jsonify({"status": "error", "message": "データが見つかりません"}), 404
 
+    _transcribe_start_time = _time.time()
+    _transcribe_progress   = {"status": "running", "step": "transcribe", "message": "🎙️ 文字起こし開始…", "progress": 5, "record_id": record_id}
+
+    def on_progress(step, message, progress):
+        global _transcribe_progress
+        _transcribe_progress = {"status": "running", "step": step, "message": message, "progress": progress, "record_id": record_id}
+
     extra_prompt = data.get("extra_prompt", "").strip()
     from app.services.transcriber import transcribe_and_summarize
-    result = transcribe_and_summarize(record["wav_file"], extra_prompt, record_id)
+    result = transcribe_and_summarize(record["wav_file"], extra_prompt, record_id, progress_callback=on_progress)
 
     if result["status"] == "error":
+        _transcribe_progress = {"status": "error", "step": "error", "message": f"⚠️ {result.get('message','')}", "progress": 0, "record_id": record_id}
         return jsonify(result), 500
 
-    # クリーニング済みテキストをDBに保存（個人用モード）
     if result.get("cleaned_transcript"):
         from app.database import update_cleaned_transcript
         update_cleaned_transcript(record_id, result["cleaned_transcript"])
 
-    # DBに保存
     update_transcript_and_summary(record_id, result["transcript"], result["ai_summary"])
+    _transcribe_progress = {"status": "done", "step": "done", "message": "✅ 完了！", "progress": 100, "record_id": record_id}
 
     return jsonify({
         "status": "done",
@@ -744,16 +980,36 @@ def recordings_delete(record_id: int):
 @app.route("/api/recordings/all", methods=["DELETE"])
 def recordings_delete_all():
     """
-    すべての録音データをDBとWAVファイルの両方から削除する。
-    Response: {"status": "deleted", "count": int}
+    すべてのユーザーデータを削除する（録音・メモ・ファイル・Web・相談履歴）
+    カテゴリ・ペルソナ設定は維持する
     """
-    all_records = get_all_recordings()
     count = 0
+
+    # ① 録音データ
+    all_records = get_all_recordings()
     for record in all_records:
         if record.get("wav_file"):
             delete_wav(record["wav_file"])
         delete_recording(record["id"])
         count += 1
+
+    # ② メモ・ファイル・Web・相談履歴
+    with get_connection() as conn:
+        # 保管庫ファイルの実体も削除
+        frows = conn.execute("SELECT filename FROM vault_files").fetchall()
+        for row in frows:
+            fpath = RESOURCE_DIR / "uploads" / row["filename"]
+            if fpath.exists():
+                fpath.unlink()
+
+        rows = conn.execute("DELETE FROM vault_memos").rowcount
+        count += rows
+        rows = conn.execute("DELETE FROM vault_files").rowcount
+        count += rows
+        rows = conn.execute("DELETE FROM council_sessions").rowcount
+        count += rows
+        conn.commit()
+
     return jsonify({"status": "deleted", "count": count}), 200
 
 
@@ -935,6 +1191,9 @@ def ollama_status():
 @app.route("/api/clean", methods=["POST"])
 def clean_only():
     """文字起こし済みのレコードに対してクリーニングのみ再実行する"""
+    global _transcribe_progress, _transcribe_start_time
+    import time as _time
+
     data      = request.get_json(silent=True) or {}
     record_id = data.get("record_id")
 
@@ -948,13 +1207,21 @@ def clean_only():
     if not record.get("transcript"):
         return jsonify({"status": "error", "message": "文字起こしデータがありません"}), 400
 
+    _transcribe_start_time = _time.time()
+    _transcribe_progress   = {"status": "running", "step": "cleaning", "message": "🧹 クリーニング開始…", "progress": 5, "record_id": record_id}
+
+    def on_progress(i, total):
+        global _transcribe_progress
+        pct = 5 + int(90 * i / max(total, 1))
+        _transcribe_progress = {"status": "running", "step": "cleaning", "message": f"🧹 クリーニング中… {i}/{total} ブロック", "progress": pct, "record_id": record_id}
+
     try:
-        env = _read_env()
+        env     = _read_env()
         ai_mode = env.get("AI_MODE", "personal")
 
         import app.services.transcriber as _tr
         if ai_mode == "business":
-            cleaned = _tr._clean_transcript_ollama(record["transcript"])
+            cleaned = _tr._clean_transcript_ollama(record["transcript"], progress_cb=on_progress)
         else:
             api_key = env.get("GROQ_API_KEY", "").strip()
             if not api_key:
@@ -965,14 +1232,20 @@ def clean_only():
 
         import app.database as _db
         _db.update_cleaned_transcript(record_id, cleaned)
+        _transcribe_progress = {"status": "done", "step": "done", "message": "✅ クリーニング完了！", "progress": 100, "record_id": record_id}
         return jsonify({"status": "done", "cleaned_transcript": cleaned}), 200
 
     except Exception as e:
+        _transcribe_progress = {"status": "error", "step": "error", "message": f"⚠️ {str(e)}", "progress": 0, "record_id": record_id}
         return jsonify({"status": "error", "message": f"クリーニングエラー: {str(e)}"}), 500
+
 
 @app.route("/api/summarize", methods=["POST"])
 def summarize_only():
     """文字起こし済みのレコードに対して要約のみ再実行する"""
+    global _transcribe_progress, _transcribe_start_time
+    import time as _time
+
     data      = request.get_json(silent=True) or {}
     record_id = data.get("record_id")
 
@@ -986,13 +1259,26 @@ def summarize_only():
     if not record.get("transcript"):
         return jsonify({"status": "error", "message": "文字起こしデータがありません"}), 400
 
+    _transcribe_start_time = _time.time()
+    _transcribe_progress   = {"status": "running", "step": "summarizing", "message": "✨ 要約開始…", "progress": 5, "record_id": record_id}
+
+    def on_progress(i, total, final=False):
+        global _transcribe_progress
+        if final:
+            _transcribe_progress = {"status": "running", "step": "summarizing", "message": "✨ 統合要約中…", "progress": 90, "record_id": record_id}
+        else:
+            pct = 5 + int(80 * i / max(total, 1))
+            _transcribe_progress = {"status": "running", "step": "summarizing", "message": f"✨ 要約中… {i}/{total} ブロック", "progress": pct, "record_id": record_id}
+
     try:
         extra_prompt = data.get("extra_prompt", "").strip()
         from app.services.transcriber import _summarize_ollama
-        ai_summary = _summarize_ollama(record["transcript"], extra_prompt)
+        ai_summary = _summarize_ollama(record["transcript"], extra_prompt, progress_cb=on_progress)
         update_transcript_and_summary(record_id, record["transcript"], ai_summary)
+        _transcribe_progress = {"status": "done", "step": "done", "message": "✅ 要約完了！", "progress": 100, "record_id": record_id}
         return jsonify({"status": "done", "ai_summary": ai_summary}), 200
     except Exception as e:
+        _transcribe_progress = {"status": "error", "step": "error", "message": f"⚠️ {str(e)}", "progress": 0, "record_id": record_id}
         return jsonify({"status": "error", "message": f"要約エラー: {str(e)}"}), 500
 
 @app.route("/api/model/status", methods=["GET"])
@@ -1018,13 +1304,36 @@ def personas_get():
     return jsonify(get_all_persona_settings()), 200
 
 
+@app.route("/api/personas", methods=["POST"])
+def personas_create():
+    """新しいペルソナを作成する"""
+    data = request.get_json(silent=True) or {}
+    name   = data.get("persona_name", "").strip()
+    role   = data.get("role", "").strip()
+    prompt = data.get("system_prompt", "").strip()
+    if not name:
+        return jsonify({"status": "error", "message": "名前は必須です"}), 400
+    return jsonify(create_persona(name, role, prompt)), 200
+
+
 @app.route("/api/personas/<string:persona_name>", methods=["PUT"])
 def personas_update(persona_name: str):
-    """ペルソナのON/OFFを更新する"""
-    data    = request.get_json(silent=True) or {}
-    enabled = bool(data.get("enabled", True))
-    result  = update_persona_enabled(persona_name, enabled)
-    return jsonify(result), 200
+    """ペルソナを更新する"""
+    data     = request.get_json(silent=True) or {}
+    new_name = data.get("persona_name", persona_name).strip()
+    role     = data.get("role", "").strip()
+    prompt   = data.get("system_prompt", "").strip()
+    enabled  = bool(data.get("enabled", True))
+    # 後方互換：enabled のみの更新も受け付ける
+    if "enabled" in data and len(data) == 1:
+        return jsonify(update_persona_enabled(persona_name, enabled)), 200
+    return jsonify(update_persona(persona_name, new_name, role, prompt, enabled)), 200
+
+
+@app.route("/api/personas/<string:persona_name>", methods=["DELETE"])
+def personas_delete(persona_name: str):
+    """ペルソナを削除する"""
+    return jsonify(delete_persona(persona_name)), 200
 
 
 @app.route("/api/council/ask", methods=["POST"])
@@ -1071,18 +1380,18 @@ def council_ask():
             if not use_all_context and key not in context_keys:
                 continue
             if r.get("ai_summary"):
-                parts.append(f"[録音:{r['title']}]\n{r['ai_summary'][:300]}")
+                parts.append(f"[録音:{r['title']}]\n{r['ai_summary'][:1000]}")
         for m in ctx.get("memos", []):
             key = f"memo_{m['id']}"
             if not use_all_context and key not in context_keys:
                 continue
-            parts.append(f"[メモ:{m['title']}]\n{m['body'][:300]}")
+            parts.append(f"[メモ:{m['title']}]\n{m['body'][:1000]}")
         for f in ctx.get("files", []):
             key = f"file_{f['id']}"
             if not use_all_context and key not in context_keys:
                 continue
             if f.get("summary"):
-                parts.append(f"[ファイル:{f['original_name']}]\n{f['summary'][:300]}")
+                parts.append(f"[ファイル:{f['original_name']}]\n{f['summary'][:1000]}")
         for s in ctx.get("sessions", []):
             if s.get("final_decision"):
                 parts.append(f"[過去の決定] 質問:{s['question']} → {s['final_decision']}")
@@ -1090,174 +1399,187 @@ def council_ask():
 
     context_text = build_context_text()
 
-    # ── ペルソナ定義（強化版） ──
-    PERSONA_SYSTEM = {
-        "戦略家": """あなたは20年以上のキャリアを持つ企業戦略顧問です。
+    # ── 利用者情報（「利用者情報」カテゴリのメモ）を常に追加 ──
+    user_profile_text = ""
+    try:
+        all_cats = get_all_categories()
+        user_cat = next((c for c in all_cats if c['name'] == '利用者情報'), None)
+        if user_cat:
+            user_memos = get_all_vault_memos(category_id=user_cat['id'])
+            if user_memos:
+                parts = ["【利用者基本情報】"]
+                for m in user_memos:
+                    parts.append(f"{m['title']}: {m['body'][:500]}")
+                user_profile_text = "\n".join(parts)
+    except Exception:
+        pass
 
-【あなたの思考スタイル】
-- 勝ちにいくことを最優先。リスクは「織り込み済み」として前進する
-- 「できない理由」ではなく「どうすれば勝てるか」だけを考える
-- 曖昧な表現・逃げの言葉は使わない。数字と期限で語る
-- 競合に勝つためなら大胆な決断も厭わない
+    # ── 関連性フィルタリング：質問と無関係なコンテキストを除外 ──
+    def filter_relevant_context(question: str, raw_context: str, env: dict) -> str:
+        """
+        Ollamaに各コンテキスト項目と質問の関連性を判定させ、
+        関連ありと判定されたもののみ返す。
+        コンテキストが空、またはOllamaが使えない場合はそのまま返す。
+        """
+        if not raw_context.strip():
+            return ""
 
-【回答の構造】
-■結論：一言で断定する（「〜すべきだ」「〜しろ」）
-■理由：なぜその判断か、根拠を2点挙げる
-■アクション：今すぐ着手すべき具体的な行動を1つ明示する
+        # 項目単位に分割（[タグ:タイトル] で始まるブロック）
+        import re as _re
+        blocks = _re.split(r'\n\n(?=\[)', raw_context.strip())
+        if len(blocks) <= 1:
+            # 分割できない場合はそのまま
+            return raw_context
 
-【制約】
-- 400字以内・日本語・敬語不要・断定調
-- 自己紹介・前置き・「〜と思います」は禁止
-- 必ず具体的なアクションで締める""",
+        ai_mode = env.get("AI_MODE", "personal")
+        model   = _get_ollama_model()
 
-        "リスク管理者": """あなたは大企業のリスク管理部門を15年率いてきた専門家です。
+        relevant_blocks = []
+        for block in blocks:
+            # タイトル行を取得（先頭の[...]行）
+            first_line = block.split('\n')[0]
+            # 本文の先頭200文字でスニペット
+            snippet = block[:300]
 
-【あなたの思考スタイル】
-- 最悪のシナリオを先に想定し、それを防ぐことを最優先する
-- 「問題が起きてから対処」ではなく「問題が起きる前に潰す」
-- 楽観的な見通しは信用しない。数字の裏を必ず確認する
-- リスクを指摘した上で、必ず現実的な対策もセットで提示する
+            judge_prompt = (
+                f"以下の「参考情報」は、「質問」に回答する際に役立つ情報ですか？\n\n"
+                f"質問：{question}\n\n"
+                f"参考情報：{snippet}\n\n"
+                f"「はい」か「いいえ」の一単語のみで答えてください。"
+            )
 
-【回答の構造】
-■結論：このまま進む場合の最大リスクを一言で
-■リスク詳細：見落とされやすい問題点を2〜3点
-■対策アクション：リスクを下げるために今すぐできる具体策を1つ
+            try:
+                if ai_mode == "business":
+                    import json as _j, urllib.request as _ur
+                    payload = _j.dumps({
+                        "model": model,
+                        "messages": [{"role": "user", "content": judge_prompt}],
+                        "stream": False,
+                        "options": {"temperature": 0, "num_predict": 10, "num_ctx": 512},
+                    }).encode("utf-8")
+                    req = _ur.Request(
+                        "http://127.0.0.1:11434/api/chat",
+                        data=payload,
+                        headers={"Content-Type": "application/json"},
+                        method="POST",
+                    )
+                    with _ur.urlopen(req, timeout=15) as res:
+                        result = _j.loads(res.read())
+                    answer = result.get("message", {}).get("content", "").strip().lower()
+                else:
+                    # Groq使用時
+                    import json as _j
+                    api_key = env.get("GROQ_API_KEY", "").strip()
+                    if not api_key:
+                        relevant_blocks.append(block)
+                        continue
+                    from groq import Groq
+                    client = Groq(api_key=api_key)
+                    resp = client.chat.completions.create(
+                        model="llama-3.3-70b-versatile",
+                        messages=[{"role": "user", "content": judge_prompt}],
+                        max_tokens=5,
+                        temperature=0,
+                    )
+                    answer = resp.choices[0].message.content.strip().lower()
 
-【制約】
-- 400字以内・日本語・敬語不要
-- 問題点だけでなく必ず対策もセットで述べる
-- 具体的なアクションで締める""",
+                # 「はい」を含む場合のみ追加
+                if "はい" in answer or "yes" in answer:
+                    relevant_blocks.append(block)
+                # 判定不能（空・エラー等）はそのまま追加
+                elif not answer:
+                    relevant_blocks.append(block)
 
-        "アナリスト": """あなたは外資系コンサルティングファーム出身のビジネスアナリストです。
+            except Exception:
+                # 判定失敗時は安全側でそのまま追加
+                relevant_blocks.append(block)
 
-【あなたの思考スタイル】
-- 感情・直感・経験談は一切排除。データと論理だけで判断する
-- 「なんとなく」「おそらく」は禁句。根拠のない発言はしない
-- 仮説を立て、それを検証する思考プロセスを踏む
-- 数字がなければ「計測が必要」と明示する
+        return "\n\n".join(relevant_blocks)
 
-【回答の構造】
-■結論：データ・論理に基づく判断を一文で
-■根拠：客観的な事実・数値・比較を2点
-■次のアクション：意思決定に必要な情報収集または検証行動を1つ具体的に
+    # ── ペルソナ定義：DBから動的読み込み ──
+    all_personas = get_all_persona_settings()
+    persona_db_map = {p['persona_name']: p for p in all_personas}
 
-【制約】
-- 400字以内・日本語・敬語不要
-- 推測は「推測」と明記する
-- 必ず検証可能なアクションで締める""",
+    # 共通フォーマット指示は廃止 → 各ペルソナのプロンプトに個別定義
+    PERSONA_FORMAT_SUFFIX = ""  # 互換性のため残すが空にする
 
-        "クリエイター": """あなたは数々のヒット商品を生み出してきたクリエイティブディレクターです。
+    # 全ペルソナ共通の情報読み取り指示（先頭に付与・簡潔版）
+    PERSONA_COMMON_PREFIX = """【役割と指示】
+あなたは以下に定義された専門家として回答する。
 
-【あなたの思考スタイル】
-- 「前例がない」は褒め言葉。既成概念は破るためにある
-- ユーザーが言語化できていないニーズを掘り起こす
-- 実現可能性より「面白いか」「誰も思いつかなかったか」を先に考える
-- ただし、アイデアは必ず「実行できる形」まで落とし込む
+【入力データの扱い】
+- 「相談者の基本情報」→ 回答の前提として必ず反映する
+- 「参考情報」→ 相談内容と関連する場合のみ使う。無関係なら無視
+- 「相談内容」→ これに答える
 
-【回答の構造】
-■結論：誰も思いつかなかった切り口を一言で
-■アイデアの核心：なぜそのアイデアが刺さるか、ユーザー心理と合わせて説明
-■最初の一手：アイデアを試すための最小限のアクションを1つ
+"""
 
-【制約】
-- 400字以内・日本語・敬語不要・エネルギッシュな文体
-- ありきたりな提案は禁止
-- 必ず「まず〇〇をやれ」という形で締める""",
-
-        "法務・コンプラ": """あなたは上場企業の法務部長として10年以上コンプライアンス管理を担ってきた専門家です。
-
-【あなたの思考スタイル】
-- 法令・契約・規制を最優先。「グレーゾーン」は「アウト」として扱う
-- 経営判断の前に法的リスクを洗い出すのが自分の役割
-- 感情論や売上目標は法的問題の免罪符にはならない
-- リスクを指摘するだけでなく、合法的に進める代替案も提示する
-
-【回答の構造】
-■結論：法的観点からの判断（「問題なし」「要確認」「要対応」のいずれか）
-■法的リスク：該当する可能性のある問題点を具体的に
-■対応アクション：法的リスクを回避・軽減するために今すぐ取るべき手続きを1つ
-
-【制約】
-- 400字以内・日本語・敬語不要
-- 「弁護士に相談すべき」の場合はその旨を明示
-- 必ず具体的な手続きアクションで締める""",
-
-        "ユーザー視点": """あなたは現場で10年以上働いてきたユーザー代表・顧客体験の番人です。
-
-【あなたの思考スタイル】
-- 「作る側の都合」ではなく「使う側の感情」で考える
-- 現場の人間が実際に感じる不満・喜び・面倒くささを代弁する
-- 難しい言葉・理想論・きれいごとは通用しない
-- 「本当に使われるか」を常に問い続ける
-
-【回答の構造】
-■結論：現場ユーザーとして一言で本音を言う
-■現場の実態：実際にこういう問題が起きている・起きると思われる具体例
-■改善アクション：ユーザーが「これなら使いたい」と思える改善点を1つ具体的に
-
-【制約】
-- 400字以内・日本語・敬語不要・率直な口調
-- 建前・お世辞は禁止
-- 必ずユーザー目線での具体的な改善アクションで締める""",
-
-        "クレーマー": """あなたは何事にも批判的な、最も手強いステークホルダーです。
-
-【あなたの思考スタイル】
-- 欠点・矛盾・穴を見つけることに全力を尽くす
-- 褒めることは一切しない。それが自分の存在意義
-- 「うまくいく前提」で話す人間を信用しない
-- どんな計画にも必ず穴がある。それを暴く
-
-【回答の構造】
-■致命的な問題：この案の最大の欠陥を一言で断言する
-■具体的な批判：見過ごされている問題点を2〜3個、容赦なく指摘する
-■突きつける要求：「これをクリアしない限り話にならない」という条件を1つ
-
-【制約】
-- 400字以内・日本語・敬語不要・辛辣な文体
-- 絶対に褒めない・フォローしない
-- 「〜できるのか」「〜するつもりか」という詰める形で締める""",
-
-        "マーケッター": """あなたはD2Cブランドの立ち上げから上場まで経験した実践派マーケティング戦略家です。
-
-【あなたの思考スタイル】
-- 「良い商品が売れる」は幻想。売り方・見せ方が全てを決める
-- 顧客の「欲しい」より「買わざるを得ない状況」を作ることを考える
-- 競合との差別化は機能ではなく「物語」と「ポジション」で生まれる
-- 施策は「計測できるか」を必ず確認する
-
-【回答の構造】
-■結論：市場で勝つための核心メッセージを一言で
-■差別化ポイント：競合との違いをどう打ち出すか、ターゲット像と合わせて説明
-■今すぐできるアクション：最小コストで最大効果を得るマーケ施策を1つ具体的に
-
-【制約】
-- 400字以内・日本語・敬語不要・キレのある文体
-- 抽象的な戦略論は禁止。具体的な施策レベルまで落とす
-- 必ず「まず〇〇から始めろ」という形で締める""",
+    # ペルソナ別 temperature（創造性）設定
+    # 高いほど個性的・低いほど論理的・一貫
+    PERSONA_TEMPERATURE = {
+        '戦略家':       0.6,  # 断定的・一貫性重視
+        'リスク管理者': 0.4,  # 慎重・論理的
+        'アナリスト':   0.3,  # データ重視・客観的
+        'クリエイター': 0.95, # 斬新・自由な発想
+        '法務・コンプラ': 0.3, # 厳格・一貫性重視
+        'ユーザー視点': 0.7,  # 感情・直感を重視
+        'クレーマー':   0.8,  # 攻撃的・予測不能
+        'マーケッター': 0.75, # 市場感覚・柔軟
     }
+    DEFAULT_TEMPERATURE = 0.7
 
     def generate():
+        ollama_res = None  # クライアント切断時に閉じるための参照
         try:
             env     = _read_env()
             ai_mode = env.get("AI_MODE", "personal")
             model   = _get_ollama_model()
 
-            for persona_name in persona_names:
-                system_content = PERSONA_SYSTEM.get(
-                    persona_name,
-                    f"あなたは{persona_name}の専門家です。質問に対して自分の立場から200字以内で日本語で答えてください。"
-                )
+            # ── 関連性フィルタリングを事前に実行（全ペルソナ共通） ──
+            filtered_context = filter_relevant_context(question, context_text, env)
 
-                # user メッセージ：コンテキストがあれば添付、なければ質問のみ
-                if context_text:
-                    user_content = (
-                        f"以下の参考情報があります。必要に応じて活用してください。\n\n"
-                        f"{context_text}\n\n"
-                        f"---\n質問：{question}"
-                    )
+            for persona_name in persona_names:
+                # DBからペルソナ定義を取得
+                p_db = persona_db_map.get(persona_name)
+                if p_db and p_db.get('system_prompt'):
+                    base_prompt = p_db['system_prompt'] + PERSONA_FORMAT_SUFFIX
                 else:
-                    user_content = f"質問：{question}"
+                    base_prompt = f"あなたは{persona_name}の専門家です。自分の立場から400字以内・日本語で答えてください。"
+                system_content = PERSONA_COMMON_PREFIX + base_prompt
+
+                # ── user メッセージ：情報を明確に分離して構造化 ──
+                parts_msg = []
+
+                # ① 相談者の基本情報（常に最初に・カテゴリ非依存）
+                if user_profile_text:
+                    parts_msg.append(
+                        "■ 相談者の基本情報\n"
+                        "以下は相談者本人に関する固定情報です。回答の前提として必ず考慮してください。\n"
+                        f"{user_profile_text}"
+                    )
+
+                # ② 関連性フィルタ済みのカテゴリ参考情報のみ渡す
+                if filtered_context:
+                    parts_msg.append(
+                        "■ 参考情報（相談内容に関連すると判断されたデータ）\n"
+                        f"{filtered_context}"
+                    )
+
+                # ③ このペルソナの過去の高評価回答（★3以上）を参考として渡す
+                try:
+                    high_rated = get_highly_rated_answers(persona_name, limit=2)
+                    if high_rated:
+                        ref_parts = [f"■ {persona_name}の過去の高評価回答（参考）\n以下はこのペルソナが過去に高く評価された回答例です。回答スタイルの参考にしてください。"]
+                        for hr in high_rated:
+                            ref_parts.append(f"【質問】{hr['question']}\n【回答(★{hr['rating']})】{hr['answer'][:300]}")
+                        parts_msg.append("\n\n".join(ref_parts))
+                except Exception:
+                    pass
+
+                # ④ 質問本文
+                parts_msg.append(f"■ 相談内容\n{question}")
+
+                user_content = "\n\n" + "\n\n".join(parts_msg)
 
                 yield f"data: {_json.dumps({'type': 'start', 'persona': persona_name}, ensure_ascii=False)}\n\n"
 
@@ -1273,7 +1595,7 @@ def council_ask():
                             ],
                             "stream": True,
                             "options": {
-                                "temperature": 0.7,
+                                "temperature": PERSONA_TEMPERATURE.get(persona_name, DEFAULT_TEMPERATURE),
                                 "num_predict": 1024,
                                 "num_ctx": 2048,
                             },
@@ -1284,8 +1606,8 @@ def council_ask():
                             headers={"Content-Type": "application/json"},
                             method="POST",
                         )
-                        with _ureq.urlopen(req, timeout=60) as res:  # 1ペルソナ最大60秒
-                            for line in res:
+                        with _ureq.urlopen(req, timeout=60) as ollama_res:
+                            for line in ollama_res:
                                 line = line.decode("utf-8").strip()
                                 if not line:
                                     continue
@@ -1322,12 +1644,26 @@ def council_ask():
                                 yield f"data: {_json.dumps({'type': 'chunk', 'persona': persona_name, 'chunk': chunk}, ensure_ascii=False)}\n\n"
 
                 except Exception as e:
-                    full_answer = f"（エラー: {str(e)}）"
-                    yield f"data: {_json.dumps({'type': 'chunk', 'persona': persona_name, 'chunk': full_answer}, ensure_ascii=False)}\n\n"
+                    err_msg = str(e)
+                    print(f"[council] ペルソナ '{persona_name}' エラー: {err_msg}")
+                    yield f"data: {_json.dumps({'type': 'error', 'message': err_msg}, ensure_ascii=False)}\n\n"
+                    full_answer = ""  # エラー時は空にして done を送らない
+                    continue  # 次のペルソナへ
 
                 yield f"data: {_json.dumps({'type': 'done', 'persona': persona_name, 'answer': full_answer}, ensure_ascii=False)}\n\n"
 
             yield f"data: {_json.dumps({'type': 'finished'}, ensure_ascii=False)}\n\n"
+
+        except GeneratorExit:
+            # クライアントが切断（リロード・ページ離脱）→ Ollama接続を即座に閉じる
+            print("[council] クライアント切断を検知。Ollama処理を中断します。")
+            try:
+                if ollama_res:
+                    ollama_res.close()
+            except Exception:
+                pass
+            # Ollama に中断リクエストを送る（/api/generate/cancel は未対応のため接続クローズのみ）
+            return
 
         except Exception as e:
             yield f"data: {_json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
@@ -1344,11 +1680,6 @@ def council_ask():
 
 @app.route("/api/council/save", methods=["POST"])
 def council_save():
-    """
-    相談結果を保存する。
-    Request JSON: {"question": str, "category_id": int, "final_decision": str,
-                   "adopted": [{"persona_name": str, "answer": str}, ...]}
-    """
     data           = request.get_json(silent=True) or {}
     question       = data.get("question", "").strip()
     category_id    = int(data.get("category_id", 1) or 1)
@@ -1359,6 +1690,83 @@ def council_save():
         return jsonify({"status": "error", "message": "質問は必須です"}), 400
 
     session_id = create_council_session(question, category_id, final_decision)
+    print(f"[council] セッション保存: id={session_id} adopted={len(adopted_list)}件")
+    for a in adopted_list:
+        pname  = a.get("persona_name", "").strip()
+        answer = a.get("answer", "").strip()
+        print(f"[council] 採用回答: persona={pname} answer_len={len(answer)}")
+        if pname and answer:
+            create_council_adopted(session_id, pname, answer)
+
+    return jsonify({"status": "ok", "session_id": session_id}), 200
+
+
+@app.route("/api/recordings/<int:record_id>/trim", methods=["POST"])
+def recording_trim(record_id: int):
+    """指定した開始・終了時間で録音をトリミングする"""
+    record = get_recording(record_id)
+    if not record:
+        return jsonify({"status": "error", "message": "データが見つかりません"}), 404
+
+    wav_path = UPLOADS_DIR / record["wav_file"]
+    if not wav_path.exists():
+        return jsonify({"status": "error", "message": "音声ファイルが見つかりません"}), 404
+
+    data     = request.get_json(silent=True) or {}
+    start    = float(data.get("start", 0))
+    end      = float(data.get("end", 0))
+    duration = end - start
+
+    if duration <= 0:
+        return jsonify({"status": "error", "message": "開始・終了位置が不正です"}), 400
+
+    try:
+        import subprocess, shutil, uuid
+        tmp_path = UPLOADS_DIR / f"trim_tmp_{uuid.uuid4().hex}.wav"
+        print(f"[trim] 実行: ffmpeg -ss {start} -t {duration} {wav_path}")
+        result   = subprocess.run([
+            "ffmpeg", "-y",
+            "-i", str(wav_path),
+            "-ss", str(start),
+            "-t",  str(duration),
+            "-c",  "copy",
+            str(tmp_path)
+        ], capture_output=True, timeout=120)
+
+        if result.returncode != 0:
+            err_msg = result.stderr.decode('utf-8', errors='replace')[-500:]
+            print(f"[trim] ffmpeg error: {err_msg}")
+            return jsonify({"status": "error", "message": f"ffmpegエラー: {err_msg}"}), 500
+
+        shutil.move(str(tmp_path), str(wav_path))
+        print(f"[trim] 完了: {wav_path}")
+        return jsonify({"status": "ok"}), 200
+
+    except FileNotFoundError as e:
+        print(f"[trim] FileNotFoundError: {e}")
+        return jsonify({"status": "error", "message": "ffmpegがインストールされていません"}), 500
+    except Exception as e:
+        import traceback
+        print(f"[trim] 例外: {traceback.format_exc()}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/api/council/sessions/<int:session_id>", methods=["DELETE"])
+def council_session_delete(session_id: int):
+    """相談セッションを削除する"""
+    return jsonify(delete_council_session(session_id)), 200
+
+
+@app.route("/api/council/sessions/<int:session_id>", methods=["PUT"])
+def council_session_update(session_id: int):
+    """既存セッションの最終判断メモと採用回答を更新する"""
+    data           = request.get_json(silent=True) or {}
+    final_decision = data.get("final_decision", "").strip()
+    adopted_list   = data.get("adopted", [])
+
+    update_council_session_decision(session_id, final_decision)
+
+    # 採用回答を追加（重複しないよう既存を確認）
     for a in adopted_list:
         pname  = a.get("persona_name", "").strip()
         answer = a.get("answer", "").strip()
@@ -1368,12 +1776,99 @@ def council_save():
     return jsonify({"status": "ok", "session_id": session_id}), 200
 
 
+@app.route("/api/personas/<string:persona_name>/icon", methods=["POST"])
+def personas_icon_upload(persona_name: str):
+    """ペルソナのアイコン画像をアップロードする（variant: wait or think）"""
+    if "file" not in request.files:
+        return jsonify({"status": "error", "message": "ファイルが選択されていません"}), 400
+
+    file    = request.files["file"]
+    variant = request.form.get("variant", "wait")  # 'wait' or 'think'
+    if variant not in ("wait", "think"):
+        variant = "wait"
+
+    ext = Path(file.filename).suffix.lower()
+    if ext not in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
+        return jsonify({"status": "error", "message": "PNG・JPG・WebP・GIF のみ対応しています"}), 400
+
+    file.seek(0, 2); size = file.tell(); file.seek(0)
+    if size > 2 * 1024 * 1024:
+        return jsonify({"status": "error", "message": "ファイルサイズは2MB以内にしてください"}), 400
+
+    icon_dir = RESOURCE_DIR / "app" / "static" / "img" / "personas" / "custom"
+    icon_dir.mkdir(parents=True, exist_ok=True)
+
+    import hashlib
+    safe_name = hashlib.md5(persona_name.encode()).hexdigest()
+    save_path = icon_dir / f"{safe_name}_{variant}.png"
+
+    try:
+        from PIL import Image as _PILImage
+        img = _PILImage.open(file.stream).convert("RGBA")
+        img = img.resize((256, 256), _PILImage.LANCZOS)
+        img.save(str(save_path), "PNG")
+    except Exception:
+        file.seek(0)
+        file.save(str(save_path))
+
+    url = f"/static/img/personas/custom/{safe_name}_{variant}.png"
+    return jsonify({"status": "ok", "variant": variant, "path": url}), 200
+
+
+@app.route("/api/personas/<string:persona_name>/icon", methods=["DELETE"])
+def personas_icon_delete(persona_name: str):
+    """ペルソナのカスタムアイコンを削除する（variant指定可）"""
+    import hashlib
+    safe_name = hashlib.md5(persona_name.encode()).hexdigest()
+    variant   = request.args.get("variant", "all")
+    icon_dir  = RESOURCE_DIR / "app" / "static" / "img" / "personas" / "custom"
+
+    if variant == "all":
+        for v in ("wait", "think"):
+            p = icon_dir / f"{safe_name}_{v}.png"
+            if p.exists(): p.unlink()
+    else:
+        p = icon_dir / f"{safe_name}_{variant}.png"
+        if p.exists(): p.unlink()
+
+    return jsonify({"status": "ok"}), 200
+
+
+@app.route("/api/personas/<string:persona_name>/icon", methods=["GET"])
+def personas_icon_get(persona_name: str):
+    """ペルソナのカスタムアイコンURL（wait/think両方）を返す"""
+    import hashlib
+    safe_name = hashlib.md5(persona_name.encode()).hexdigest()
+    icon_dir  = RESOURCE_DIR / "app" / "static" / "img" / "personas" / "custom"
+    result    = {}
+    for v in ("wait", "think"):
+        p = icon_dir / f"{safe_name}_{v}.png"
+        result[v] = f"/static/img/personas/custom/{safe_name}_{v}.png" if p.exists() else None
+    return jsonify(result), 200
+
+
 @app.route("/api/council/sessions", methods=["GET"])
 def council_sessions_get():
-    """相談履歴を返す"""
+    """相談履歴を検索・フィルターして返す"""
     category_id = request.args.get("category_id", type=int)
-    sessions    = get_council_sessions(category_id=category_id)
+    keyword     = request.args.get("keyword", "").strip()
+    date_from   = request.args.get("date_from", "").strip()
+    date_to     = request.args.get("date_to", "").strip()
+    sessions    = get_council_sessions(
+        category_id=category_id,
+        keyword=keyword,
+        date_from=date_from,
+        date_to=date_to,
+    )
     return jsonify(sessions), 200
+
+
+@app.route("/api/council/adopted/<int:adopted_id>/rating", methods=["PUT"])
+def council_adopted_rating(adopted_id: int):
+    """採用回答の評価を更新する"""
+    data   = request.get_json(silent=True) or {}
+    rating = int(data.get("rating", 0))
+    return jsonify(update_adopted_rating(adopted_id, rating)), 200
 
 
 # ══════════════════════════════════════════════════
@@ -1382,7 +1877,7 @@ def council_sessions_get():
 
 
 def _start_ollama():
-    """AURAと一緒にOllamaを起動する（ビジネス用モード時）"""
+    """COVEと一緒にOllamaを起動する（ビジネス用モード時）"""
     import subprocess
     import urllib.request
     # すでに起動しているか確認
@@ -1392,14 +1887,17 @@ def _start_ollama():
         return
     except Exception:
         pass
-    # Ollamaを起動
+    # Ollamaを起動（最後のリクエストから5分後にモデルを自動アンロード）
     try:
+        env = os.environ.copy()
+        env["OLLAMA_KEEP_ALIVE"] = "5m"  # 5分間使用がなければRAMを解放
         subprocess.Popen(
             ["ollama", "serve"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            env=env,
         )
-        print("[main] Ollamaを起動しました")
+        print("[main] Ollamaを起動しました（KEEP_ALIVE=5m）")
     except Exception as e:
         print(f"[main] Ollama起動エラー: {e}")
 
@@ -1416,9 +1914,9 @@ def _auto_preload_model():
         env = _read_env()
         if env.get("AI_MODE") == "business":
             import platform as _platform
-            is_win = _platform.system() == "Windows"
-            is_arm = _platform.machine() in ("arm64", "aarch64")
-            if is_win or is_arm:
+            system = _platform.system()
+            # Windows・Mac・Linux すべてで実行
+            if system in ("Windows", "Darwin", "Linux"):
                 from app.services.transcriber import preload_model
                 preload_model()
                 print("[main] 起動時モデルプリロード開始")
@@ -1436,7 +1934,7 @@ if __name__ == "__main__":
         app.run(host="127.0.0.1", port=5001, debug=True)
     else:
         # 配布用：ブラウザを別スレッドで起動してからFlaskを起動
-        print("AURA を起動しています...")
+        print("COVE を起動しています...")
         print("ブラウザが開かない場合は http://127.0.0.1:5001 にアクセスしてください")
         threading.Thread(target=_start_ollama, daemon=True).start()
         threading.Thread(target=_auto_preload_model, daemon=True).start()

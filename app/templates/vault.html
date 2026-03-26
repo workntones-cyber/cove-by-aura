@@ -6,7 +6,7 @@
   <title>COVE - 保管庫</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="icon" type="image/x-icon" href="/static/aura.ico">
+  <link rel="icon" type="image/x-icon" href="/static/cove.ico">
   <link rel="stylesheet" href="/static/css/style.css">
   <style>
     .vault-layout {
@@ -20,7 +20,7 @@
     }
 
     /* 左パネル */
-    .vault-left { display: flex; flex-direction: column; gap: 20px; }
+    .vault-left { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
     .vault-panel {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -59,7 +59,7 @@
     .upload-cat-row { display: flex; gap: 8px; align-items: center; margin-top: 10px; justify-content: center; }
 
     /* 右パネル */
-    .vault-right { position: sticky; top: 80px; }
+    .vault-right { position: sticky; top: 80px; min-width: 0; }
     .vault-list-header {
       display: flex; gap: 6px; align-items: center;
       flex-wrap: wrap; margin-bottom: 14px;
@@ -139,13 +139,14 @@
 </head>
 <body>
 <nav>
-  <span class="nav-logo"><img src="/static/aura_icon_256.png" style="width:24px;height:24px;vertical-align:middle;margin-right:8px;border-radius:4px;">AURA</span>
+  <span class="nav-logo">COVE</span>
   <div class="nav-links">
     <a href="/" class="nav-link {% if active_page == 'index' %}active{% endif %}">🎙️ 録音</a>
     <a href="/vault" class="nav-link {% if active_page == 'vault' %}active{% endif %}">🗄️ 保管庫</a>
     <a href="/council" class="nav-link {% if active_page == 'council' %}active{% endif %}">💬 相談室</a>
     <a href="/settings" class="nav-link {% if active_page == 'settings' %}active{% endif %}">⚙️ 設定</a>
-    <button class="nav-shutdown-btn" onclick="shutdownApp()" title="AURAを終了する">⏻ 終了</button>
+    <a href="/help" target="_blank" class="nav-link" title="取扱説明書" style="font-size:18px;padding:4px 8px;">❓</a>
+    <button class="nav-shutdown-btn" onclick="shutdownApp()" title="COVEを終了する">⏻ 終了</button>
   </div>
 </nav>
 
@@ -158,8 +159,14 @@
     <div class="vault-panel">
       <div class="vault-panel-title">📝 テキストメモを追加</div>
       <input id="memoTitle" class="vault-input" type="text" placeholder="タイトル（任意）" maxlength="100" />
-      <select id="memoCategoryId" class="vault-input vault-select"></select>
-      <textarea id="memoBody" class="vault-input vault-textarea" placeholder="メモ内容を入力してください..."></textarea>
+      <select id="memoCategoryId" class="vault-input vault-select" onchange="onMemoCategoryChange()"></select>
+      <textarea id="memoBody" class="vault-input vault-textarea" placeholder="メモ内容を入力してください..."
+        oninput="updateCharCount('memoBody','memoBodyCount')"></textarea>
+      <div style="text-align:right;font-size:11px;color:var(--muted);margin-top:2px;">
+        <span id="memoBodyCount">0</span> 文字
+        <span style="color:var(--border);margin:0 4px;">|</span>
+        相談室参照：先頭 1,000 文字・入力上限 10,000 文字
+      </div>
       <div class="vault-form-actions">
         <button class="btn-xs" onclick="clearMemoForm()">クリア</button>
         <button class="save-btn" onclick="saveMemo()" style="padding:10px 18px;font-size:13px;">💾 保存</button>
@@ -192,6 +199,11 @@
       </div>
       <input type="file" id="fileInput" style="display:none;"
         accept=".pdf,.docx,.xlsx,.pptx,.txt,.md" onchange="handleFileSelect(event)" />
+      <div id="fileInfoBar" style="display:none;font-size:11px;color:var(--muted);margin-top:6px;text-align:right;">
+        ファイルサイズ：<span id="fileSizeLabel">—</span>
+        <span style="color:var(--border);margin:0 4px;">|</span>
+        相談室参照：整形後先頭 1,000 文字
+      </div>
     </div>
 
 
@@ -206,7 +218,8 @@
 
       <div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.6;">
         ⚠️ <strong>取得できないケース：</strong>ログインが必要なページ・JavaScriptで動的生成されるページ（X・LinkedIn等）<br>
-        ✅ <strong>対応：</strong>企業サイト・Qiita・Zenn・ニュース・Wikipedia等
+        ✅ <strong>対応：</strong>企業サイト・Qiita・Zenn・ニュース・Wikipedia等<br>
+        📋 <strong>取得制限：</strong>1ページあたり最大 8,000 文字・相談室参照は先頭 1,000 文字
       </div>
 
       <!-- ページ一覧（解析後に表示） -->
@@ -238,6 +251,49 @@
       </div>
     </div>
 
+    <!-- 録音データ追加 -->
+    <div class="vault-panel">
+      <div class="vault-panel-title">🎙️ 録音データを追加</div>
+      <input id="recTitle" class="vault-input" type="text" placeholder="タイトル（任意）" maxlength="100"/>
+      <textarea id="recMemo" class="vault-input vault-textarea" placeholder="概要メモ（任意）" style="min-height:60px;"></textarea>
+      <select id="recCategoryId" class="vault-input vault-select"></select>
+
+      <!-- ドロップエリア -->
+      <div class="upload-area" id="recUploadArea"
+        onclick="document.getElementById('recFileInput').click()"
+        ondragover="handleDragOver(event)"
+        ondragleave="handleDragLeave()"
+        ondrop="handleRecDrop(event)">
+        <div class="upload-area-icon">🎵</div>
+        <div class="upload-area-text">クリックまたはドラッグ＆ドロップ</div>
+        <div class="upload-area-types">WAV・MP3・M4A・OGG・FLAC・WebM 対応</div>
+      </div>
+      <input type="file" id="recFileInput" style="display:none;"
+        accept=".wav,.mp3,.m4a,.ogg,.flac,.webm" onchange="handleRecFileSelect(event)"/>
+
+      <!-- 進捗表示 -->
+      <div id="recProgress" style="display:none;margin-top:10px;">
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;">
+          <div style="font-size:12px;color:var(--muted);margin-bottom:6px;" id="recProgressStep">⏳ 処理を開始しています…</div>
+          <div style="background:var(--border);border-radius:99px;height:4px;overflow:hidden;">
+            <div id="recProgressBar" style="background:#7C6AF7;height:100%;width:0%;border-radius:99px;transition:width 0.5s;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- エラー表示 -->
+      <div id="recError" style="display:none;margin-top:10px;background:#FCEBEB;border:1px solid #E24B4A;border-radius:8px;padding:12px;">
+        <div style="font-size:12px;font-weight:600;color:#A32D2D;margin-bottom:4px;">⚠️ エラーが発生しました</div>
+        <div style="font-size:11px;color:#A32D2D;" id="recErrorMsg"></div>
+        <div style="font-size:11px;color:var(--muted);margin-top:6px;">ファイルを確認して、もう一度アップロードしてください。</div>
+      </div>
+
+      <div style="font-size:11px;color:var(--muted);margin-top:8px;line-height:1.6;">
+        📋 アップロード後に自動で文字起こし・クリーニング・要約を実施します<br>
+        ⏱ ファイルサイズにより数分かかる場合があります
+      </div>
+    </div>
+
   </div>
 
   <!-- 右：一覧 -->
@@ -251,6 +307,7 @@
         <button class="filter-btn" onclick="setTypeFilter('memo')">📝 メモ</button>
         <button class="filter-btn" onclick="setTypeFilter('file')">📎 ファイル</button>
         <button class="filter-btn" onclick="setTypeFilter('web')">🌐 Web</button>
+        <button class="filter-btn" onclick="setTypeFilter('recording')">🎙️ 録音</button>
         <select class="filter-select" id="categoryFilter" onchange="setCategoryFilter(this.value)">
           <option value="">カテゴリ: すべて</option>
         </select>
@@ -276,7 +333,29 @@
 
 <script>
 let _categories = [], _typeFilter = 'all', _catFilter = null;
-let _memos = [], _files = [];
+let _memos = [], _files = [], _recordings = [];
+
+// ── 文字数カウンター ──────────────────────────────
+function updateCharCount(textareaId, counterId) {
+  const ta  = document.getElementById(textareaId);
+  const cnt = document.getElementById(counterId);
+  if(!ta || !cnt) return;
+  const len = ta.value.length;
+  cnt.textContent = len.toLocaleString();
+  // 1000字を超えたら色を変えて警告
+  cnt.style.color = len > 10000 ? '#E24B4A' : 'var(--muted)';
+}
+
+// ── ファイルサイズ表示 ────────────────────────────
+function showFileInfo(file) {
+  const bar   = document.getElementById('fileInfoBar');
+  const label = document.getElementById('fileSizeLabel');
+  if(!bar || !label || !file) return;
+  const kb = (file.size / 1024).toFixed(1);
+  const mb = (file.size / 1024 / 1024).toFixed(2);
+  label.textContent = file.size > 1024 * 1024 ? `${mb} MB` : `${kb} KB`;
+  bar.style.display = 'block';
+}
 
 document.addEventListener('DOMContentLoaded', async () => {
   await loadCategories();
@@ -287,12 +366,22 @@ document.addEventListener('DOMContentLoaded', async () => {
 async function loadCategories() {
   const res = await fetch('/api/categories');
   _categories = await res.json();
-  // 入力欄のselect
-  const opts = _categories.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
-  ['memoCategoryId','fileCategoryId','webCategoryId'].forEach(id => {
-    const el = document.getElementById(id); if (el) el.innerHTML = opts;
+
+  // メモ：全カテゴリ（利用者情報含む）
+  const memoOpts = _categories.map(c =>
+    `<option value="${c.id}"${c.id===2?' style="font-weight:600;color:#7C6AF7;"':''}>${c.name}${c.id===2?' 👤':''}</option>`
+  ).join('');
+  const memoSel = document.getElementById('memoCategoryId');
+  if(memoSel) memoSel.innerHTML = memoOpts;
+
+  // ファイル・Web・録音：利用者情報カテゴリを除外
+  const otherOpts = _categories.filter(c => c.name !== '利用者情報')
+    .map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+  ['fileCategoryId','webCategoryId','recCategoryId'].forEach(id => {
+    const el = document.getElementById(id); if(el) el.innerHTML = otherOpts;
   });
-  // フィルタのselect
+
+  // フィルタのselect：全カテゴリ
   const catSel = document.getElementById('categoryFilter');
   catSel.innerHTML = '<option value="">カテゴリ: すべて</option>' +
     _categories.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
@@ -301,7 +390,7 @@ async function loadCategories() {
 function setTypeFilter(type) {
   _typeFilter = type;
   document.querySelectorAll('.filter-btn').forEach((b, i) => {
-    b.classList.toggle('active', ['all','memo','file','web'][i] === type);
+    b.classList.toggle('active', ['all','memo','file','web','recording'][i] === type);
   });
   renderList();
 }
@@ -313,11 +402,14 @@ function setCategoryFilter(val) {
 
 // ── データ読み込み ────────────────────────────────
 async function loadAll() {
-  const [memosRes, filesRes] = await Promise.all([
-    fetch('/api/vault/memos'), fetch('/api/vault/files')
+  const [memosRes, filesRes, recsRes] = await Promise.all([
+    fetch('/api/vault/memos'),
+    fetch('/api/vault/files'),
+    fetch('/api/recordings').catch(() => ({ json: async () => [] })),
   ]);
-  _memos = await memosRes.json();
-  _files = await filesRes.json();
+  _memos      = await memosRes.json();
+  _files      = await filesRes.json();
+  _recordings = await recsRes.json();
   renderList();
 }
 
@@ -327,6 +419,12 @@ function renderList() {
 
   let items = [];
 
+  if (_typeFilter === 'all' || _typeFilter === 'recording') {
+    items.push(..._recordings
+      .filter(r => _catFilter === null || r.category_id === _catFilter)
+      .map(r => ({ ...r, _type: 'recording' }))
+    );
+  }
   if (_typeFilter === 'all' || _typeFilter === 'memo') {
     items.push(..._memos
       .filter(m => _catFilter === null || m.category_id === _catFilter)
@@ -393,6 +491,21 @@ function renderList() {
         </div>
         <div class="vault-item-body">${escHtml(item.body)}</div>
       </div>`;
+    } else if (item._type === 'recording') {
+      const summaryStatus = item.summary_status === 'pending' ? ' ⏳' : item.summary_status === 'error' ? ' ❌' : '';
+      return `<div class="vault-item" id="item-rec-${item.id}" onclick="toggleItem('item-rec-${item.id}')">
+        <div class="vault-item-header">
+          <div class="vault-item-icon">🎙️</div>
+          <div class="vault-item-meta">
+            <div class="vault-item-title">${escHtml(item.title||'無題')}${summaryStatus}</div>
+            <div class="vault-item-info">${badge}<span>${item.created_at.slice(0,10)}</span>${item.memo?`<span style="color:var(--muted);">${escHtml(item.memo.slice(0,20))}</span>`:''}</div>
+          </div>
+          <div class="vault-item-actions">
+            <button class="btn-xs btn-xs-danger" onclick="event.stopPropagation();deleteRecordingItem(${item.id})">🗑️</button>
+          </div>
+        </div>
+        ${item.ai_summary ? `<div class="vault-item-body"><strong style="font-size:10px;color:var(--muted);">要約</strong><br>${escHtml(item.ai_summary)}</div>` : ''}
+      </div>`;
     } else {
       const icon   = iconMap[item.filetype]||'📎';
       const status = item.summary_status==='pending' ? ' ⏳' : item.summary_status==='error' ? ' ❌' : '';
@@ -414,7 +527,33 @@ function renderList() {
   }).join('');
 }
 
-// ── テキストメモ ──────────────────────────────────
+// ── 録音削除 ──────────────────────────────────────
+async function deleteRecordingItem(id) {
+  if(!confirm('この録音データを削除しますか？')) return;
+  await fetch(`/api/recordings/${id}`, { method:'DELETE' });
+  showToast('🗑️ 削除しました');
+  await loadAll();
+}
+
+// ── メモカテゴリ変更時：利用者情報なら既存内容を入力欄に反映 ──
+async function onMemoCategoryChange() {
+  const sel     = document.getElementById('memoCategoryId');
+  const catId   = parseInt(sel.value);
+  const catName = sel.options[sel.selectedIndex]?.text || '';
+  if(!catName.includes('利用者情報')) return;
+
+  // 利用者情報カテゴリの既存メモを取得
+  try {
+    const memos = await fetch(`/api/vault/memos?category_id=${catId}`).then(r => r.json());
+    if(memos.length > 0) {
+      const m = memos[0]; // 最初の1件を表示
+      document.getElementById('memoTitle').value = m.title || '';
+      document.getElementById('memoBody').value  = m.body  || '';
+      updateCharCount('memoBody', 'memoBodyCount');
+      showToast('既存の利用者情報を読み込みました');
+    }
+  } catch(e) {}
+}
 async function saveMemo() {
   const title = document.getElementById('memoTitle').value.trim();
   const body  = document.getElementById('memoBody').value.trim();
@@ -520,8 +659,8 @@ function clearMemoForm() {
 // ── ファイル ──────────────────────────────────────
 function handleDragOver(e) { e.preventDefault(); document.getElementById('uploadArea').classList.add('dragover'); }
 function handleDragLeave() { document.getElementById('uploadArea').classList.remove('dragover'); }
-async function handleDrop(e) { e.preventDefault(); document.getElementById('uploadArea').classList.remove('dragover'); if (e.dataTransfer.files[0]) await uploadFile(e.dataTransfer.files[0]); }
-async function handleFileSelect(e) { if (e.target.files[0]) await uploadFile(e.target.files[0]); e.target.value=''; }
+async function handleDrop(e) { e.preventDefault(); document.getElementById('uploadArea').classList.remove('dragover'); if (e.dataTransfer.files[0]) { showFileInfo(e.dataTransfer.files[0]); await uploadFile(e.dataTransfer.files[0]); } }
+async function handleFileSelect(e) { if (e.target.files[0]) { showFileInfo(e.target.files[0]); await uploadFile(e.target.files[0]); } e.target.value=''; }
 
 let _filePollTimer = null;
 
@@ -615,7 +754,6 @@ async function analyzeUrl() {
     });
     const data = await res.json();
     if (data.status === 'ok') {
-      _analyzedLinks = data.links;
       renderLinkList(data);
     } else {
       showToast('❌ ' + (data.message || '解析に失敗しました'));
@@ -630,16 +768,24 @@ function renderLinkList(data) {
   const listEl  = document.getElementById('webLinkList');
   const countEl = document.getElementById('webLinkCount');
   const linksEl = document.getElementById('webLinks');
+  const inputUrl = document.getElementById('webUrl').value.trim();
 
-  if (!data.links.length) {
-    showToast('ℹ️ 同一ドメインのリンクが見つかりませんでした');
-    return;
+  // 入力URLが含まれていなければ先頭に追加
+  const allLinks = [...data.links];
+  if(!allLinks.find(l => l.url === inputUrl)) {
+    allLinks.unshift({ url: inputUrl, title: inputUrl });
   }
 
-  countEl.textContent = `同一ドメインのページ: ${data.links.length}件`;
-  linksEl.innerHTML   = data.links.map((link, i) => `
+  _analyzedLinks = allLinks;
+
+  const sameCount = data.links.length;
+  countEl.textContent = sameCount > 0
+    ? `入力URL + 同一ドメイン ${sameCount}件`
+    : `入力URLのみ（同一ドメインのリンクなし）`;
+
+  linksEl.innerHTML = allLinks.map((link, i) => `
     <label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:12px;transition:background 0.1s;" onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''">
-      <input type="checkbox" data-idx="${i}" style="flex-shrink:0;" />
+      <input type="checkbox" data-idx="${i}" ${i === 0 ? 'checked' : ''} style="flex-shrink:0;" />
       <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escHtml(link.url)}">${escHtml(link.title || link.url)}</span>
     </label>
   `).join('');
@@ -720,13 +866,89 @@ function _resetWebProgress() {
 }
 
 function _warnBeforeLeave(e) {
+  // Ollama処理を中断
+  navigator.sendBeacon('/api/ollama/abort', JSON.stringify({}));
   e.preventDefault();
   e.returnValue = 'Webページの取得処理中です。ページを離れると処理が中断される場合があります。';
   return e.returnValue;
 }
+
+// ページ離脱時に全Ollama処理を中断（シャットダウンはしない）
+window.addEventListener('pagehide', () => {
+  navigator.sendBeacon('/api/ollama/abort', JSON.stringify({}));
+});
 // ── ユーティリティ ────────────────────────────────
 function toggleItem(id) { document.getElementById(id)?.classList.toggle('open'); }
 function escHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+// ── 録音アップロード ──────────────────────────────
+async function handleRecFileSelect(e) {
+  if(e.target.files[0]) await uploadRecording(e.target.files[0]);
+  e.target.value = '';
+}
+async function handleRecDrop(e) {
+  e.preventDefault();
+  document.getElementById('recUploadArea').classList.remove('dragover');
+  if(e.dataTransfer.files[0]) await uploadRecording(e.dataTransfer.files[0]);
+}
+
+async function uploadRecording(file) {
+  const progress = document.getElementById('recProgress');
+  const bar      = document.getElementById('recProgressBar');
+  const step     = document.getElementById('recProgressStep');
+  const errorBox = document.getElementById('recError');
+  const errorMsg = document.getElementById('recErrorMsg');
+
+  errorBox.style.display = 'none';
+  progress.style.display = 'block';
+  bar.style.width        = '5%';
+  step.textContent       = '⏳ アップロード中…';
+
+  const form = new FormData();
+  form.append('file',        file);
+  form.append('title',       document.getElementById('recTitle').value.trim() || file.name);
+  form.append('memo',        document.getElementById('recMemo').value.trim());
+  form.append('category_id', document.getElementById('recCategoryId').value || '1');
+
+  try {
+    const res  = await fetch('/api/vault/recording/upload', { method:'POST', body:form });
+    const data = await res.json();
+    if(data.status !== 'ok') throw new Error(data.message || 'アップロードに失敗しました');
+
+    // ポーリングで進捗確認（2秒ごと）
+    const stepLabels = {
+      start:      '⏳ アップロード完了。処理を開始します…',
+      transcribe: '🎙️ 文字起こし中… （数分かかる場合があります）',
+      summary:    '✨ クリーニング・要約中…',
+      done:       '✅ 完了しました！',
+      error:      '⚠️ エラーが発生しました',
+    };
+    const progressMap = { start:8, transcribe:35, summary:85, done:100 };
+
+    await new Promise((resolve, reject) => {
+      const poll = setInterval(async () => {
+        try {
+          const st  = await fetch('/api/vault/recording/status').then(r=>r.json());
+          const pct = progressMap[st.step] || parseInt(st.progress) || 0;
+          bar.style.width  = pct + '%';
+          step.textContent = stepLabels[st.step] || st.message || '処理中…';
+          if(st.status === 'done')  { clearInterval(poll); resolve(); }
+          if(st.status === 'error') { clearInterval(poll); reject(new Error(st.message)); }
+        } catch(e) { /* ネットワーク一時エラーは無視 */ }
+      }, 2000);
+    });
+
+    setTimeout(() => { progress.style.display = 'none'; }, 2500);
+    document.getElementById('recTitle').value = '';
+    document.getElementById('recMemo').value  = '';
+    showToast('録音データを登録しました ✓');
+
+  } catch(err) {
+    progress.style.display = 'none';
+    errorBox.style.display = 'block';
+    errorMsg.textContent   = err.message || '不明なエラーが発生しました';
+  }
+}
+
 function showToast(msg) { const t=document.createElement('div'); t.className='toast'; t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.classList.add('show'),10); setTimeout(()=>{t.classList.remove('show');setTimeout(()=>t.remove(),300);},3000); }
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('editModal')?.addEventListener('click', e => {
@@ -734,7 +956,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-function shutdownApp() { if(!confirm('AURAを終了しますか？'))return; fetch('/api/shutdown',{method:'POST'}).catch(()=>{}); window.close(); setTimeout(()=>{document.body.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:Arial;color:#888;">AURAを終了しました。このタブを閉じてください。</div>';},500); }
+function shutdownApp() { if(!confirm('COVEを終了しますか？'))return; fetch('/api/shutdown',{method:'POST'}).catch(()=>{}); window.close(); setTimeout(()=>{document.body.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:Arial;color:#888;">COVEを終了しました。このタブを閉じてください。</div>';},500); }
 </script>
 </body>
 </html>

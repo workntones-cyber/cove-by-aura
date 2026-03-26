@@ -6,32 +6,34 @@
   <title>COVE - 相談室</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="icon" type="image/x-icon" href="/static/aura.ico">
+  <link rel="icon" type="image/x-icon" href="/static/cove.ico">
   <link rel="stylesheet" href="/static/css/style.css">
   <style>
     /* ─── レイアウト基盤 ─── */
     .page-layout {
-      display: flex;
-      gap: 0;
+      display: block;
       min-height: calc(100vh - 56px);
       padding-top: 56px;
+      margin-right: 260px; /* 参照パネル分を確保 */
     }
     .main-col {
-      flex: 1;
-      min-width: 0;
       padding: 24px 28px 320px 28px;
     }
-    /* ─── 右サイドパネル ─── */
+    /* ─── 右サイドパネル（完全固定） ─── */
     .context-panel {
       width: 260px;
-      flex-shrink: 0;
       background: var(--surface);
       border-left: 1px solid var(--border);
-      position: sticky;
+      position: fixed;
       top: 56px;
-      height: calc(100vh - 56px);
+      right: 0;
+      height: calc(100vh - 56px); /* JS で上書きされる */
       overflow-y: auto;
+      overflow-x: hidden;
       padding: 20px 16px;
+      z-index: 99;
+      box-sizing: border-box;
+      transition: height .15s ease;
     }
     .ctx-title {
       font-size: 12px; font-weight: 600; color: var(--text);
@@ -98,11 +100,14 @@
     .c-btn:hover { opacity: .88; } .c-btn:disabled { opacity: .4; cursor: default; }
 
     /* ─── ペルソナエリア ─── */
-    .persona-stage { position: relative; width: 100%; margin-bottom: 28px; }
+    .persona-stage {
+      width: 100%; margin-bottom: 28px;
+      display: flex; flex-wrap: wrap; gap: 12px;
+      align-items: flex-start;
+    }
 
     /* ペルソナカード：縦積み・枠を円形に */
     .persona-card {
-      position: absolute;
       background: var(--surface); border: 2px solid var(--border);
       border-radius: 10px;
       padding: 8px 6px 6px;
@@ -177,12 +182,13 @@
       overflow: hidden; max-height: 0;
       transition: max-height .25s ease;
     }
-    .ctx-acc-body.open { max-height: 600px; }
+    .ctx-acc-body.open { max-height: 9999px; }
 
+    /* ─── RPG回答パネル ─── */
     /* ─── RPG回答パネル ─── */
     .rpg-panel {
       position: fixed; bottom: 0; left: 0; right: 0;
-      height: 34vh; min-height: 230px; max-height: 340px;
+      height: 34vh; min-height: 220px; max-height: 60vh;
       background: var(--surface); border-top: 2px solid var(--border);
       box-shadow: 0 -6px 32px rgba(0,0,0,.1);
       z-index: 200; display: none; flex-direction: column;
@@ -205,6 +211,13 @@
     .rpg-nav-btn:hover:not(:disabled) { background: var(--border); }
     .rpg-nav-btn:disabled { opacity: .3; cursor: default; }
     .rpg-counter { font-size: 12px; color: var(--muted); min-width: 44px; text-align: center; }
+    .rpg-end-btn {
+      background: #7C6AF7; color: #fff; border: none;
+      border-radius: 6px; padding: 5px 12px;
+      font-size: 12px; font-weight: 600; cursor: pointer;
+      font-family: inherit; transition: opacity .2s;
+    }
+    .rpg-end-btn:hover { opacity: .85; }
     .rpg-close-btn {
       background: transparent; border: none; cursor: pointer;
       font-size: 17px; color: var(--muted); padding: 2px 6px;
@@ -244,17 +257,17 @@
     }
 
     /* ─── 下段 ─── */
-    .council-bottom { display: flex; gap: 24px; align-items: flex-start; margin-top: 4px; }
+    .council-bottom { display: flex; gap: 24px; align-items: stretch; margin-top: 4px; }
     .decision-section {
       flex: 1; background: var(--surface); border: 1px solid var(--border);
       border-radius: 16px; padding: 16px 20px;
     }
     .history-section {
       flex: 1; background: var(--surface); border: 1px solid var(--border);
-      border-radius: 16px; padding: 16px 20px; max-height: 340px; overflow-y: auto;
+      border-radius: 16px; padding: 16px 20px; max-height: 520px; overflow-y: auto;
     }
     .section-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 10px; }
-    .adopted-list  { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; min-height: 24px; }
+    .adopted-list  { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
     .adopted-tag   { background: #FAEEDA; color: #854F0B; border: 1px solid #EF9F27; border-radius: 6px; padding: 3px 9px; font-size: 11px; }
     .decision-textarea {
       width: 100%; background: var(--bg); border: 1px solid var(--border);
@@ -268,21 +281,45 @@
       color: var(--text); font-family: inherit; transition: background .2s;
     }
     .save-decision-btn:hover { background: var(--bg); }
-    .history-item { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+    .history-item { display: flex; flex-direction: column; gap: 4px; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 12px; cursor: pointer; }
     .history-item:last-child { border-bottom: none; }
-    .history-date { color: var(--muted); min-width: 64px; font-size: 10px; padding-top: 1px; white-space: nowrap; }
-    .history-body { flex: 1; }
-    .history-q    { font-weight: 600; color: var(--text); margin-bottom: 2px; }
+    .history-item:hover { background: var(--bg); border-radius: 6px; padding-left: 6px; }
+    .history-date { color: var(--muted); font-size: 10px; white-space: nowrap; }
+    .history-date .history-q { font-weight: 600; color: var(--text); font-size: 12px; margin-left: 6px; white-space: normal; }
     .history-meta { font-size: 10px; color: var(--muted); }
     .history-decision { font-size: 10px; color: var(--muted); margin-top: 2px; font-style: italic; }
     .history-empty { color: var(--muted); font-size: 13px; text-align: center; padding: 20px 0; }
+    .history-detail { display:none; margin-top:8px; padding:8px; background:var(--bg); border-radius:8px; }
+    .history-item.open .history-detail { display:block; }
+    /* ★ 評価 */
+    .star-rating { display:inline-flex; gap:2px; }
+    .star { font-size:16px; cursor:pointer; color:var(--border); transition:color .15s; }
+    .star.on { color:#EF9F27; }
+    .star:hover { color:#FAC775; }
   </style>
 </head>
 <body>
 
+<!-- エラーモーダル -->
+<div id="errorModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);
+     z-index:99999;align-items:center;justify-content:center;backdrop-filter:blur(6px);">
+  <div style="background:#1e1e2e;border:1px solid #E24B4A;border-radius:16px;padding:32px 28px;
+              width:90%;max-width:420px;text-align:center;box-shadow:0 24px 80px rgba(0,0,0,.8);">
+    <div style="font-size:48px;margin-bottom:16px;" id="errorModalIcon">⚠️</div>
+    <div style="font-size:16px;font-weight:700;color:#E24B4A;margin-bottom:12px;" id="errorModalTitle">
+      エラーが発生しました
+    </div>
+    <div style="font-size:13px;color:#ccc;line-height:1.8;margin-bottom:24px;" id="errorModalMsg"></div>
+    <button id="errorModalBtn" onclick="closeErrorModal()"
+      style="padding:10px 28px;border-radius:8px;border:none;background:#7C6AF7;
+             color:#fff;cursor:pointer;font-size:14px;font-weight:600;font-family:inherit;width:100%;">
+      相談をやり直す
+    </button>
+  </div>
+</div>
+
 <nav>
   <span class="nav-logo">
-    <img src="/static/aura_icon_256.png" style="width:24px;height:24px;vertical-align:middle;margin-right:8px;border-radius:4px;">
     COVE
   </span>
   <div class="nav-links">
@@ -290,14 +327,19 @@
     <a href="/vault"   class="nav-link {% if active_page=='vault'   %}active{% endif %}">🗄️ 保管庫</a>
     <a href="/council" class="nav-link {% if active_page=='council' %}active{% endif %}">💬 相談室</a>
     <a href="/settings"class="nav-link {% if active_page=='settings'%}active{% endif %}">⚙️ 設定</a>
+    <a href="/help" target="_blank" class="nav-link" title="取扱説明書" style="font-size:18px;padding:4px 8px;">❓</a>
     <button class="nav-shutdown-btn" onclick="shutdownApp()" title="終了">⏻ 終了</button>
   </div>
 </nav>
 
 <div class="page-layout">
-
-  <!-- メインカラム -->
   <div class="main-col">
+
+    <!-- 基本情報未登録バナー -->
+    <div id="profileBanner" style="display:none;background:#FAEEDA;border:1px solid #EF9F27;border-radius:10px;padding:10px 16px;margin-bottom:12px;font-size:12px;color:#854F0B;align-items:center;justify-content:space-between;">
+      <span>⚠️ <strong>利用者情報が未登録です。</strong>登録すると相談の精度が上がります。</span>
+      <a href="/vault" style="color:#7C6AF7;font-weight:600;text-decoration:none;white-space:nowrap;margin-left:12px;">保管庫で登録する →</a>
+    </div>
 
     <!-- ① 入力エリア -->
     <div class="council-input-section">
@@ -320,23 +362,41 @@
     </div>
 
     <!-- ② ペルソナエリア -->
-    <div class="persona-stage" id="personaStage">
-      <div id="personaContainer" style="position:absolute;top:0;left:0;width:100%;pointer-events:none;"></div>
-    </div>
+    <div class="persona-stage" id="personaStage"></div>
 
     <!-- ③ 下段 -->
     <div id="bottomArea">
       <div class="council-bottom">
         <div class="decision-section">
           <div class="section-title">最終判断メモ</div>
-          <div class="adopted-list" id="adoptedList"></div>
+          <!-- 採用回答一覧 -->
+          <div id="adoptedAnswersList" style="display:none;margin-bottom:12px;"></div>
+          <!-- 採用タグ -->
+          <div class="adopted-list" id="adoptedList" style="display:none;"></div>
           <textarea class="decision-textarea" id="decisionText"
-            placeholder="採用した意見をもとに最終判断を記入…"></textarea>
-          <button class="save-decision-btn" onclick="saveSession()">保存する</button>
-          <div style="clear:both"></div>
+            placeholder="採用した意終判断を記入…"></textarea>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">
+            <button class="save-decision-btn" onclick="saveSession()">💾 保存する</button>
+          </div>
         </div>
         <div class="history-section">
           <div class="section-title">📋 相談履歴</div>
+          <!-- 検索・フィルター -->
+          <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">
+            <input id="historyKeyword" type="text" placeholder="🔍 キーワード検索…"
+              class="c-textarea" style="height:32px;padding:5px 10px;font-size:12px;"
+              oninput="debounceHistorySearch()"/>
+            <div style="display:flex;gap:6px;">
+              <select id="historyCategory" class="c-select" style="flex:1;font-size:12px;"
+                onchange="loadHistory()">
+                <option value="">カテゴリ: すべて</option>
+              </select>
+              <input id="historyDateFrom" type="date" class="c-select" style="font-size:11px;"
+                onchange="loadHistory()"/>
+              <input id="historyDateTo" type="date" class="c-select" style="font-size:11px;"
+                onchange="loadHistory()"/>
+            </div>
+          </div>
           <div id="historyList"><div class="history-empty">まだ相談履歴がありません</div></div>
         </div>
       </div>
@@ -344,13 +404,13 @@
 
   </div><!-- /main-col -->
 
-  <!-- 右サイドパネル：参照データ -->
-  <div class="context-panel" id="contextPanel">
-    <div class="ctx-title">🗂 参照データ</div>
-    <div id="ctxContent"><div class="ctx-empty">カテゴリを選択してください</div></div>
-  </div>
-
 </div><!-- /page-layout -->
+
+<!-- 右サイドパネル：参照データ（fixed配置・page-layoutの外） -->
+<div class="context-panel" id="contextPanel">
+  <div class="ctx-title">🗂 ペルソナが参照するデータ</div>
+  <div id="ctxContent"><div class="ctx-empty">カテゴリを選択してください</div></div>
+</div>
 
 <!-- RPG回答パネル -->
 <div class="rpg-panel" id="rpgPanel">
@@ -365,6 +425,7 @@
       <button class="rpg-nav-btn" id="rpgPrev" onclick="rpgNav(-1)">◀</button>
       <span class="rpg-counter" id="rpgCounter">- / -</span>
       <button class="rpg-nav-btn" id="rpgNext" onclick="rpgNav(1)">▶</button>
+      <button class="rpg-end-btn" onclick="endConsult()" title="相談を終了して保存エリアを表示">相談終了</button>
       <button class="rpg-close-btn" onclick="closeRpgPanel()" title="閉じる">✕</button>
     </div>
   </div>
@@ -405,12 +466,8 @@ const PERSONA_IMG_MAP = {
 // 画像が存在するか確認済みのキャッシュ
 const imgExistsCache = {};
 
-function getPersonaImgState(state, thinkPhase) {
-  // state: 'wait' | 'think' | 'done'
-  // thinkPhase: 1 or 2 （think中の交互切替用）
-  if(state === 'think') return thinkPhase === 2 ? 'think2' : 'think1';
-  if(state === 'done')  return 'done';
-  return 'wait';
+function getPersonaImgState(state) {
+  return state === 'think' ? 'think' : 'wait';
 }
 
 function drawPersonaFaceImg(name, imgState) {
@@ -418,12 +475,11 @@ function drawPersonaFaceImg(name, imgState) {
   if(!key) return null;
   const src = `/static/img/personas/${key}_${imgState}.png`;
   return `<img src="${src}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"
-    onerror="this.parentElement.innerHTML=drawPersonaFaceSVGFallback('${name}','${imgState}')" >`;
+    onerror="this.parentElement.innerHTML=buildAvatarFallback('${name}','${imgState}')" >`;
 }
 
-// think交互アニメーション管理
-const thinkTimers = {}; // name -> intervalId
-const thinkPhases = {}; // name -> 1 or 2
+const thinkTimers = {};
+const thinkPhases = {};
 
 function nameToKey(name) {
   const p = PERSONA_DEFS.find(x => x.name === name);
@@ -431,57 +487,113 @@ function nameToKey(name) {
 }
 
 function startThinkAnimation(name) {
-  if(thinkTimers[name]) return;
-  thinkPhases[name] = 1;
-  thinkTimers[name] = setInterval(() => {
-    thinkPhases[name] = thinkPhases[name] === 1 ? 2 : 1;
-    const key = nameToKey(name);
-    const avatarEl = document.querySelector(`#pcard-${key} .p-avatar`);
-    if(avatarEl) {
-      const imgState = getPersonaImgState('think', thinkPhases[name]);
-      avatarEl.innerHTML = drawPersonaFaceImg(name, imgState) ||
-        `<svg viewBox="0 0 56 56">${drawPersonaFaceSVGInner(name,'think')}</svg>`;
-    }
-    if(rpgActiveList[rpgIndex] === name) {
-      const rpgFaceEl = document.getElementById('rpgFace');
-      if(rpgFaceEl) {
-        const imgState = getPersonaImgState('think', thinkPhases[name]);
-        rpgFaceEl.innerHTML = drawPersonaFaceImg(name, imgState) ||
-          `<svg viewBox="0 0 56 56">${drawPersonaFaceSVGInner(name,'think')}</svg>`;
-      }
-    }
-  }, 60000);
-}
-
-function stopThinkAnimation(name) {
-  if(thinkTimers[name]) {
-    clearInterval(thinkTimers[name]);
-    delete thinkTimers[name];
-    delete thinkPhases[name];
+  const key      = nameToKey(name);
+  const avatarEl = document.querySelector(`#pcard-${key} .p-avatar`);
+  if(avatarEl) avatarEl.innerHTML = buildAvatarHtml(name, 'think');
+  if(rpgActiveList[rpgIndex] === name) {
+    const rpgFaceEl = document.getElementById('rpgFace');
+    if(rpgFaceEl) rpgFaceEl.innerHTML = buildAvatarHtml(name, 'think');
   }
 }
 
-// ペルソナのstateが変わったときにアニメを制御
+function stopThinkAnimation(name) {
+  const key      = nameToKey(name);
+  const avatarEl = document.querySelector(`#pcard-${key} .p-avatar`);
+  if(avatarEl) avatarEl.innerHTML = buildAvatarHtml(name, 'wait');
+}
+
 function updateThinkAnimation(name, newState) {
-  if(newState === 'think') {
-    startThinkAnimation(name);
-  } else {
-    stopThinkAnimation(name);
+  if(newState === 'think') startThinkAnimation(name);
+  else                     stopThinkAnimation(name);
+}
+
+
+// ── デフォルトフォールバック（clown_wait.png） ──
+function drawSilhouette() {
+  return `<svg viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="28" cy="28" r="28" fill="#9CA3AF"/>
+    <circle cx="28" cy="20" r="10" fill="#4B5563"/>
+    <ellipse cx="28" cy="46" rx="16" ry="12" fill="#4B5563"/>
+  </svg>`;
+}
+
+// カスタムアイコンキャッシュ（name -> url or null）
+const customIconCache = {};
+
+async function loadCustomIcon(name) {
+  if((name + ':wait') in customIconCache) return;
+  try {
+    const res  = await fetch(`/api/personas/${encodeURIComponent(name)}/icon`);
+    const data = await res.json();
+    customIconCache[name + ':wait']  = data.wait  || null;
+    customIconCache[name + ':think'] = data.think || null;
+  } catch(e) {
+    customIconCache[name + ':wait']  = null;
+    customIconCache[name + ':think'] = null;
   }
 }
 
 // アバターHTMLを生成（カード・RPGパネル共通）
 function buildAvatarHtml(name, state) {
-  const phase = thinkPhases[name] || 1;
-  const imgState = getPersonaImgState(state, phase);
-  return drawPersonaFaceImg(name, imgState) ||
-    `<svg viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg"><defs></defs>${drawPersonaFaceSVGInner(name, state)}</svg>`;
+  const imgState = getPersonaImgState(state); // 'wait' or 'think'
+
+  // ① カスタムアイコン
+  const customWait  = customIconCache[name + ':wait'];
+  const customThink = customIconCache[name + ':think'];
+  if(customWait || customThink) {
+    const url = (imgState === 'think' && customThink) ? customThink : (customWait || customThink);
+    return `<img src="${url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
+  }
+
+  // ② デフォルトPNG（PERSONA_IMG_MAPに登録済みペルソナ）
+  // think → wait の順で試みる。imgタグのonerrorは使わずJSで制御
+  const key = PERSONA_IMG_MAP[name];
+  if(key) {
+    const src = imgState === 'think'
+      ? `/static/img/personas/${key}_think.png`
+      : `/static/img/personas/${key}_wait.png`;
+    // 画像存在確認はキャッシュ済み or 即時返す（ブラウザが404をキャッシュするため2回目以降は速い）
+    return `<img src="${src}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"
+      onerror="handleAvatarError(this,'${name}','${imgState}')">`;
+  }
+
+  // ③ シルエット
+  return drawSilhouette();
 }
 
-// SVGフォールバック（画像がない場合）
+// onerror ハンドラ（グローバル関数として定義することでonerror属性から確実に呼べる）
+function handleAvatarError(img, name, imgState) {
+  const key = PERSONA_IMG_MAP[name];
+  if(key && imgState === 'think') {
+    // think が404 → wait に差し替え
+    img.onerror = function() { handleAvatarError(this, name, 'wait'); };
+    img.src = `/static/img/personas/${key}_wait.png`;
+    return;
+  }
+  // wait も失敗 or PERSONA_IMG_MAPにない → SVG描画
+  if(key) {
+    const inner = drawPersonaFaceSVGInner(name, 'wait');
+    if(inner && !inner.includes('fill="#ccc"')) {
+      img.outerHTML = `<svg viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg">${inner}</svg>`;
+      return;
+    }
+  }
+  img.outerHTML = drawSilhouette();
+}
+
+function buildAvatarFallback(name, imgState) {
+  return drawPersonaFaceSVGFallback(name, imgState);
+}
+
 function drawPersonaFaceSVGFallback(name, imgState) {
-  const st = imgState.startsWith('think') ? 'think' : imgState;
-  return `<svg viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg"><defs></defs>${drawPersonaFaceSVGInner(name, st)}</svg>`;
+  if(PERSONA_IMG_MAP[name]) {
+    const st    = imgState === 'think' ? 'think' : 'wait';
+    const inner = drawPersonaFaceSVGInner(name, st);
+    if(inner && !inner.includes('fill="#ccc"')) {
+      return `<svg viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg">${inner}</svg>`;
+    }
+  }
+  return drawSilhouette();
 }
 
 // 旧SVG描画（フォールバック用・内部のみ）
@@ -738,6 +850,7 @@ let rpgIndex = 0;
 let rpgActiveList = [];
 let typingTimer = null;
 const shownAnswers = {};
+let sseAbortController = null; // SSE中断用
 
 // 経過時間管理
 const personaStartTimes = {};  // name -> Date（思考開始時刻）
@@ -778,41 +891,17 @@ function updateElapsedDisplay() {
 // ══════════════════════════════════════════════════
 function renderPersonaStage() {
   const stage = document.getElementById('personaStage');
-  const pCont = document.getElementById('personaContainer');
-  const W     = stage.offsetWidth || 900;
-  const n     = PERSONA_DEFS.length; // 8人
-  const cols  = 4;
-
-  const CARD_W = 170;
-  const CARD_H = 200; // 高さ目安
-  // 横：8人を4列として、全幅を均等割り（オフセット分の余白を考慮）
-  const colSpan = Math.floor(W / cols); // 1列あたりの幅
-  // 縦：行間を詰める（オフセット最大35px + カード高さ + 余白）
-  const ROW_H  = CARD_H + 20;
-
-  pCont.innerHTML = '';
-  let maxBottom = 0;
+  stage.innerHTML = ''; // flex子要素として直接追加
 
   PERSONA_DEFS.forEach((p, i) => {
     const present = personaPresent[p.name] !== false;
     const state   = personaStates[p.name] || 'wait';
     const st      = present ? state : 'absent';
 
-    const col   = i % cols;
-    const row   = Math.floor(i / cols);
-    const [ox, oy] = LAYOUT_OFFSETS[i] || [0, 0];
-
-    // 千鳥：2段目は半列分右にずらす
-    const stagger = row % 2 === 1 ? colSpan / 2 : 0;
-    const baseCX  = colSpan * col + colSpan / 2 + stagger;
-    // 全体を左寄せ：戦略家(col=0,row=0)のleftが0になるよう調整
-    const leftOffset = -(colSpan / 2 - CARD_W / 2);
-    const cardX   = Math.round(baseCX - CARD_W / 2 + ox + leftOffset);
-    const cardY   = row * ROW_H + oy + 28;
-
     const statusTxt    = !present ? '退出中' : st==='wait'?'待機中':st==='think'?'考え中…':'回答完了';
     const presenceClass = present ? 'in' : 'out';
     const presenceTxt   = present ? '退出する' : '入室する';
+    const clickable     = st === 'done' && present;
 
     if(st === 'think') startThinkAnimation(p.name);
     else               stopThinkAnimation(p.name);
@@ -820,30 +909,49 @@ function renderPersonaStage() {
     const div = document.createElement('div');
     div.id = `pcard-${p.key}`;
     div.className = `persona-card ${st}`;
-    div.style.cssText = `left:${cardX}px;top:${cardY}px;width:${CARD_W}px;pointer-events:auto;`;
+    if(clickable) {
+      div.style.cursor = 'pointer';
+      div.title = 'クリックで回答を表示';
+      div.addEventListener('click', (e) => {
+        if(e.target.closest('.presence-btn')) return;
+        jumpToPersona(p.name);
+      });
+    }
     div.innerHTML = `
       <div style="position:relative;">
         ${st==='think'?`<div class="think-bubble"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>`:''}
         <div class="p-avatar">${buildAvatarHtml(p.name, st==='absent'?'wait':st)}</div>
+        ${clickable?`<div style="position:absolute;bottom:-2px;right:-2px;background:#1D9E75;color:#fff;border-radius:50%;width:18px;height:18px;font-size:10px;display:flex;align-items:center;justify-content:center;border:2px solid var(--surface);">▶</div>`:''}
       </div>
       <div class="p-info">
         <div class="p-name">${p.name}</div>
         <div class="p-role">${p.role}</div>
         <div class="p-status"><span class="p-dot"></span><span>${statusTxt}</span></div>
       </div>
-      <button class="presence-btn ${presenceClass}" onclick="togglePresence('${p.name}')">${presenceTxt}</button>`;
-    pCont.appendChild(div);
-
-    const bottom = cardY + CARD_H + 10;
-    if(bottom > maxBottom) maxBottom = bottom;
+      <button class="presence-btn ${presenceClass}" onclick="event.stopPropagation();togglePresence('${p.name}')">${presenceTxt}</button>`;
+    stage.appendChild(div);
   });
-
-  stage.style.height = (maxBottom + 16) + 'px';
 }
 
 function togglePresence(name) {
   personaPresent[name] = !personaPresent[name];
   renderPersonaStage();
+}
+
+// ペルソナカードをクリックしてRPGパネルに表示
+function jumpToPersona(name) {
+  // RPGパネルが非表示なら開く
+  if(!document.getElementById('rpgPanel').classList.contains('visible')) {
+    openRpgPanel();
+  }
+  // rpgActiveList 内のインデックスを探す
+  const idx = rpgActiveList.indexOf(name);
+  if(idx !== -1) {
+    rpgIndex = idx;
+    rpgShowCurrent();
+  }
+  // パネルへスクロール
+  document.getElementById('rpgPanel').scrollIntoView({ behavior: 'smooth', block: 'end' });
 }
 
 // ══════════════════════════════════════════════════
@@ -932,13 +1040,113 @@ function getEnabledContextKeys() {
 // ══════════════════════════════════════════════════
 //  RPGパネル
 // ══════════════════════════════════════════════════
+// 参照パネルの高さを RPG パネルに合わせて動的に計算
+function updateContextPanelHeight() {
+  const nav   = 56;
+  const panel = document.getElementById('contextPanel');
+  const rpg   = document.getElementById('rpgPanel');
+  if(!panel) return;
+
+  const rpgVisible = rpg && rpg.classList.contains('visible');
+
+  if(rpgVisible) {
+    // RPGパネルのCSS height値を直接取得（offsetHeightはdisplay直後でも正確）
+    const rpgH = rpg.offsetHeight || 280;
+    panel.style.height = `${window.innerHeight - nav - rpgH}px`;
+  } else {
+    panel.style.height = `${window.innerHeight - nav}px`;
+  }
+}
+
 function openRpgPanel() {
   document.getElementById('rpgPanel').classList.add('visible');
   document.getElementById('bottomArea').style.display = 'none';
+  updateContextPanelHeight();
 }
 function closeRpgPanel() {
   document.getElementById('rpgPanel').classList.remove('visible');
+  updateContextPanelHeight();
+}
+
+// 相談終了：処理中でも中断して下段を表示し、履歴に保存
+async function endConsult() {
+  clearConsultSession(); // 手動終了 → セッション削除
+  // SSE接続を中断（処理中の場合）
+  if(sseAbortController) {
+    sseAbortController.abort();
+    sseAbortController = null;
+    // サーバー側のOllama処理も中断
+    navigator.sendBeacon('/api/ollama/abort', JSON.stringify({}));
+    // 相談するボタンを戻す
+    const btn = document.getElementById('consultBtn');
+    if(btn) btn.disabled = false;
+  }
+
+  if(elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+  document.getElementById('rpgPanel').classList.remove('visible');
   document.getElementById('bottomArea').style.display = '';
+  updateContextPanelHeight();
+  updateAdoptedAnswersList();
+
+  // 全ペルソナ回答済みかチェック
+  const allDone = rpgActiveList.length > 0 && rpgActiveList.every(n => personaStates[n] === 'done');
+
+  // 相談内容がありまだ保存されていない場合のみ自動保存
+  const question = document.getElementById('councilQuestion').value.trim();
+  if(question && !currentSessionId) {
+    try {
+      const catId = parseInt(document.getElementById('councilCategory').value) || 1;
+      const data  = await (await fetch('/api/council/save', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          question,
+          category_id: catId,
+          final_decision: allDone ? '' : '（中断）',
+          adopted: adoptedPersonas.map(a => ({ persona_name: a.name, answer: a.answer })),
+        }),
+      })).json();
+      if(data.status === 'ok') {
+        currentSessionId = data.session_id;
+        if(!allDone) showToast('相談を中断し、履歴に保存しました');
+        loadHistory();
+      }
+    } catch(e) {}
+  }
+
+  setTimeout(() => {
+    document.getElementById('bottomArea').scrollIntoView({ behavior:'smooth', block:'start' });
+  }, 100);
+}
+
+// 採用回答一覧を最終判断メモ上に表示
+function updateAdoptedAnswersList() {
+  const container = document.getElementById('adoptedAnswersList');
+  if(!container) return;
+  if(!adoptedPersonas.length) {
+    container.style.display = 'none';
+    return;
+  }
+  container.style.display = 'block';
+  container.innerHTML = `
+    <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:8px;">📋 採用した回答</div>
+    ${adoptedPersonas.map(a => `
+      <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;">
+        <div style="font-size:11px;font-weight:600;color:#7C6AF7;margin-bottom:4px;">${a.name}（${PERSONA_DEFS.find(p=>p.name===a.name)?.role||''}）</div>
+        <div style="font-size:12px;color:var(--text);line-height:1.7;white-space:pre-wrap;">${a.answer}</div>
+      </div>
+    `).join('')}`;
+}
+
+// 利用者情報の存在チェック
+async function checkUserProfile() {
+  try {
+    const cats  = await (await fetch('/api/categories')).json();
+    const uCat  = cats.find(c => c.name === '利用者情報');
+    if(!uCat) { document.getElementById('profileBanner').style.display = 'flex'; return; }
+    const memos = await (await fetch(`/api/vault/memos?category_id=${uCat.id}`)).json();
+    const banner = document.getElementById('profileBanner');
+    if(banner) banner.style.display = memos.length ? 'none' : 'flex';
+  } catch(e) {}
 }
 
 function rpgNav(dir) {
@@ -1030,14 +1238,16 @@ function adoptCurrent() {
   if(!ans || adoptedPersonas.some(a => a.name === name)) return;
   adoptedPersonas.push({ name, answer: ans });
   updateAdoptedList();
+  updateAdoptedAnswersList();
   rpgShowCurrent();
   renderPersonaStage();
   showToast(`${name} の回答を採用しました`);
 }
 
 function updateAdoptedList() {
-  document.getElementById('adoptedList').innerHTML =
-    adoptedPersonas.map(a => `<span class="adopted-tag">${a.name}</span>`).join('');
+  const el = document.getElementById('adoptedList');
+  el.innerHTML = adoptedPersonas.map(a => `<span class="adopted-tag">${a.name}</span>`).join('');
+  el.style.display = adoptedPersonas.length ? 'flex' : 'none';
 }
 
 // ══════════════════════════════════════════════════
@@ -1050,6 +1260,26 @@ function startConsult() {
   const categoryId = parseInt(document.getElementById('councilCategory').value) || 1;
   rpgActiveList = PERSONA_DEFS.filter(p => personaPresent[p.name] !== false).map(p => p.name);
   if(!rpgActiveList.length) { showToast('入室中のペルソナがいません', true); return; }
+
+  // 🧪 動作検証フラグのチェック
+  if(sessionStorage.getItem('cove_debug_ollama_disconnect')) {
+    sessionStorage.setItem('cove_council_question', question);
+    sessionStorage.setItem('cove_council_category_id', String(categoryId));
+    showErrorModal('[WinError 10054] 既存の接続はリモート ホストに強制的に切断されました。');
+    return;
+  }
+  if(sessionStorage.getItem('cove_debug_memory_error')) {
+    showErrorModal('out of memory: CUDA out of memory');
+    return;
+  }
+  if(sessionStorage.getItem('cove_debug_model_not_found')) {
+    showErrorModal('model "gemma3:27b" not found');
+    return;
+  }
+
+  // 相談内容をセッションに保存（Ollama切断時の復元用）
+  sessionStorage.setItem('cove_council_question',   question);
+  sessionStorage.setItem('cove_council_category_id', String(categoryId));
 
   PERSONA_DEFS.forEach(p => { personaStates[p.name]='wait'; personaAnswers[p.name]=''; });
   Object.keys(shownAnswers).forEach(k => delete shownAnswers[k]);
@@ -1077,16 +1307,20 @@ function startConsult() {
 
   const enabledKeys = getEnabledContextKeys();
 
+  // AbortController でSSEをキャンセル可能にする
+  sseAbortController = new AbortController();
+
   fetch('/api/council/ask', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ question, category_id: categoryId, personas: rpgActiveList, context_keys: enabledKeys }),
+    signal: sseAbortController.signal,
   }).then(res => {
     const reader = res.body.getReader(), dec = new TextDecoder();
     let buf = '';
     function pump() {
       reader.read().then(({ done, value }) => {
-        if(done) { btn.disabled = false; return; }
+        if(done) { btn.disabled = false; sseAbortController = null; return; }
         buf += dec.decode(value, { stream: true });
         const parts = buf.split('\n\n');
         buf = parts.pop();
@@ -1096,12 +1330,20 @@ function startConsult() {
           try { handleSSE(JSON.parse(line.slice(5).trim())); } catch(e) {}
         });
         pump();
+      }).catch(err => {
+        // AbortErrorは正常中断なので無視
+        if(err.name !== 'AbortError') {
+          btn.disabled = false;
+          showToast('通信エラーが発生しました', true);
+        }
       });
     }
     pump();
-  }).catch(() => {
-    btn.disabled = false;
-    showToast('通信エラーが発生しました', true);
+  }).catch(err => {
+    if(err.name !== 'AbortError') {
+      btn.disabled = false;
+      showToast('通信エラーが発生しました', true);
+    }
   });
 }
 
@@ -1139,12 +1381,147 @@ function handleSSE(obj) {
       if(elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
       document.getElementById('consultBtn').disabled = false;
       showToast('全員の回答が完了しました');
+      clearConsultSession(); // 正常完了 → セッション削除
       break;
     case 'error':
-      showToast('エラー: ' + obj.message, true);
       document.getElementById('consultBtn').disabled = false;
+      // SSE中断
+      if(sseAbortController) { sseAbortController.abort(); sseAbortController = null; }
+      if(elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+      // RPGパネルを閉じる（bottomAreaは表示しない）
+      document.getElementById('rpgPanel').classList.remove('visible');
+      updateContextPanelHeight();
+      // エラーモーダルを表示
+      showErrorModal(obj.message);
       break;
   }
+}
+
+// ── エラーモーダル ──
+function showErrorModal(rawMsg) {
+  const m = (rawMsg || '').toLowerCase();
+
+  const isOllama  = m.includes('connect') || m.includes('10054') ||
+                    m.includes('10061')   || m.includes('強制的に切断') ||
+                    m.includes('既存の接続');
+  const isMemory  = m.includes('out of memory') || m.includes('cuda out');
+  const isDisk    = m.includes('disk') || m.includes('storage') || m.includes('no space') ||
+                    m.includes('ディスク');
+
+  let icon, title, body, btnLabel, btnAction;
+
+  if(isOllama) {
+    icon      = '🔌';
+    title     = 'AI処理中に切断されました';
+    body      = '相談中にAI（ペルソナ）との接続が切れました。<br>「相談をやり直す」を押すと、<br>自動的に相談が再開されます。';
+    btnLabel  = '相談をやり直す';
+    btnAction = 'restart';
+  } else if(isMemory) {
+    icon      = '💾';
+    title     = 'メモリが不足しています';
+    body      = '他のアプリを閉じてメモリを確保してください。<br><br>'
+              + '【対処方法】<br>'
+              + '① ブラウザや他のアプリを閉じる<br>'
+              + '② COVEを終了する<br>'
+              + '③ PC整理後にCOVEを再起動する';
+    btnLabel  = 'COVEを終了する';
+    btnAction = 'shutdown';
+  } else if(isDisk) {
+    icon      = '💿';
+    title     = 'ディスクの空き容量が不足しています';
+    body      = '不要なファイルを削除してディスクを整理してください。<br><br>'
+              + '【対処方法】<br>'
+              + '① 不要なファイル・録音データを削除する<br>'
+              + '② ごみ箱を空にする<br>'
+              + '③ COVEを終了する<br>'
+              + '④ 整理後にCOVEを再起動する';
+    btnLabel  = 'COVEを終了する';
+    btnAction = 'shutdown';
+  } else if(m.includes('model') && m.includes('not found')) {
+    icon      = '🤖';
+    title     = 'AIモデルが見つかりません';
+    body      = 'AIモデルがインストールされていません。<br>設定画面でモデルをダウンロードしてください。';
+    btnLabel  = '設定へ';
+    btnAction = 'settings';
+  } else {
+    icon      = '⚠️';
+    title     = 'エラーが発生しました';
+    body      = humanizeError(rawMsg).replace(/\n/g, '<br>');
+    btnLabel  = '閉じる';
+    btnAction = 'close';
+  }
+
+  document.getElementById('errorModalIcon').textContent  = icon;
+  document.getElementById('errorModalTitle').textContent = title;
+  document.getElementById('errorModalMsg').innerHTML     = body;
+  document.getElementById('errorModalBtn').textContent   = btnLabel;
+  document.getElementById('errorModalBtn').dataset.action = btnAction;
+  document.getElementById('errorModal').style.display    = 'flex';
+}
+
+async function closeErrorModal() {
+  const action = document.getElementById('errorModalBtn').dataset.action || 'close';
+  document.getElementById('errorModal').style.display = 'none';
+
+  if(action === 'shutdown') {
+    // COVEを終了
+    await fetch('/api/shutdown', { method: 'POST' }).catch(()=>{});
+    document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:Arial;color:#888;font-size:18px;">COVEを終了しました。このタブを閉じてください。</div>';
+    return;
+  }
+
+  if(action === 'settings') {
+    window.location.href = '/settings';
+    return;
+  }
+
+  if(action === 'restart') {
+    // 相談内容をセッションから復元して再開
+    const saved    = sessionStorage.getItem('cove_council_question');
+    const savedCat = sessionStorage.getItem('cove_council_category_id');
+    if(saved) {
+      document.getElementById('councilQuestion').value = saved;
+      if(savedCat) {
+        const sel = document.getElementById('councilCategory');
+        if(sel) sel.value = savedCat;
+      }
+      sessionStorage.removeItem('cove_council_question');
+      sessionStorage.removeItem('cove_council_category_id');
+      startConsult();
+    }
+  }
+  // 'close' は何もしない（モーダルを閉じるだけ）
+}
+
+// ── エラーメッセージを人間が理解できる言葉に変換 ──
+function humanizeError(msg) {
+  if(!msg) return '不明なエラーが発生しました。ページを再読み込みしてください。';
+  const m = msg.toLowerCase();
+
+  // 接続切れ（Windows・Mac・Linux 各エラー文字列に対応）
+  if(m.includes('connection refused') || m.includes('11434') ||
+     m.includes('winerror 10054') || m.includes('winerror 10061') ||
+     m.includes('forcibly closed') || m.includes('強制的に切断') ||
+     m.includes('既存の接続') || m.includes('connect'))
+    return 'AIとの接続が切れました。もう一度「相談する」ボタンを押してください。（相談内容は保持されています）';
+  if(m.includes('timeout') || m.includes('timed out'))
+    return 'AI処理がタイムアウトしました。モデルが重すぎる可能性があります。再度お試しください。';
+  if(m.includes('out of memory') || m.includes('cuda out'))
+    return 'メモリ不足です。他のアプリを閉じてから再試行してください。';
+  if(m.includes('model') && m.includes('not found'))
+    return 'AIモデルが見つかりません。設定画面でモデルを確認してください。';
+  if(m.includes('disk') || m.includes('storage') || m.includes('no space'))
+    return 'ディスクの空き容量が不足しています。不要なファイルを削除してください。';
+  if(m.includes('network') || m.includes('socket'))
+    return 'ネットワークエラーが発生しました。接続状況を確認して再試行してください。';
+
+  return `エラーが発生しました：${msg}`;
+}
+
+// ── 相談セッション一時保存を削除 ──
+function clearConsultSession() {
+  sessionStorage.removeItem('cove_council_question');
+  sessionStorage.removeItem('cove_council_category_id');
 }
 
 // ══════════════════════════════════════════════════
@@ -1155,48 +1532,166 @@ async function saveSession() {
   const catId    = parseInt(document.getElementById('councilCategory').value) || 1;
   const decision = document.getElementById('decisionText').value.trim();
   if(!question) { showToast('相談内容がありません', true); return; }
+  // adoptedPersonas は {name, answer} 形式 → APIは {persona_name, answer} を期待
+  const adoptedForApi = adoptedPersonas.map(a => ({ persona_name: a.name, answer: a.answer }));
   try {
-    const data = await (await fetch('/api/council/save', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ question, category_id:catId, final_decision:decision, adopted:adoptedPersonas }),
-    })).json();
-    if(data.status==='ok') { currentSessionId=data.session_id; showToast('保存しました'); loadHistory(); }
-    else showToast('保存に失敗しました', true);
+    let data;
+    if(currentSessionId) {
+      data = await (await fetch(`/api/council/sessions/${currentSessionId}`, {
+        method:'PUT', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ final_decision: decision, adopted: adoptedForApi }),
+      })).json();
+    } else {
+      data = await (await fetch('/api/council/save', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ question, category_id:catId, final_decision:decision, adopted:adoptedForApi }),
+      })).json();
+    }
+    if(data.status==='ok') {
+      currentSessionId = data.session_id || currentSessionId;
+      showToast('保存しました ✓');
+      loadHistory();
+    } else {
+      showToast('保存に失敗しました', true);
+    }
   } catch(e) { showToast('通信エラー', true); }
+}
+
+let _historySearchTimer = null;
+function debounceHistorySearch() {
+  clearTimeout(_historySearchTimer);
+  _historySearchTimer = setTimeout(loadHistory, 400);
 }
 
 async function loadHistory() {
   try {
-    const sessions = await (await fetch('/api/council/sessions')).json();
-    const list = document.getElementById('historyList');
-    if(!sessions.length) { list.innerHTML='<div class="history-empty">まだ相談履歴がありません</div>'; return; }
+    const keyword  = document.getElementById('historyKeyword')?.value.trim() || '';
+    const catId    = document.getElementById('historyCategory')?.value || '';
+    const dateFrom = document.getElementById('historyDateFrom')?.value || '';
+    const dateTo   = document.getElementById('historyDateTo')?.value || '';
+
+    const params = new URLSearchParams();
+    if(keyword)  params.set('keyword',   keyword);
+    if(catId)    params.set('category_id', catId);
+    if(dateFrom) params.set('date_from', dateFrom);
+    if(dateTo)   params.set('date_to',   dateTo);
+
+    const sessions = await (await fetch('/api/council/sessions?' + params)).json();
+    const list     = document.getElementById('historyList');
+    if(!sessions.length) {
+      list.innerHTML = '<div class="history-empty">該当する履歴がありません</div>';
+      return;
+    }
     list.innerHTML = sessions.map(s => {
-      const dt      = s.created_at ? s.created_at.slice(0,16) : '';
-      const adopted = s.adopted&&s.adopted.length ? s.adopted.map(a=>a.persona_name).join('・') : 'なし';
-      return `<div class="history-item">
-        <div class="history-date">${dt}</div>
-        <div class="history-body">
-          <div class="history-q">${s.question}</div>
-          <div class="history-meta">採用：${adopted}</div>
-          ${s.final_decision?`<div class="history-decision">→ ${s.final_decision}</div>`:''}
+      const dt       = s.created_at ? s.created_at.slice(0,16) : '';
+      const catName  = s.category_name || '未分類';
+      const adopted  = s.adopted && s.adopted.length ? s.adopted : [];
+      const adoptedHtml = adopted.map(a => `
+        <div style="margin-bottom:8px;padding:8px;background:var(--surface);border-radius:6px;border:1px solid var(--border);">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+            <span style="font-size:11px;font-weight:600;color:#7C6AF7;">${a.persona_name}</span>
+            <div class="star-rating" data-id="${a.id}" data-rating="${a.rating||0}">
+              ${[1,2,3,4,5].map(n =>
+                `<span class="star ${(a.rating||0)>=n?'on':''}" onclick="rateAdopted(${a.id},${n},this.parentElement)">★</span>`
+              ).join('')}
+            </div>
+          </div>
+          <div style="font-size:11px;color:var(--text);line-height:1.6;white-space:pre-wrap;">${a.answer.slice(0,200)}${a.answer.length>200?'…':''}</div>
+        </div>`).join('');
+      return `<div class="history-item" id="hsession-${s.id}">
+        <div style="display:flex;align-items:flex-start;gap:4px;" onclick="toggleHistoryItem(this.parentElement)">
+          <div style="flex:1;min-width:0;">
+            <div class="history-date">${dt}<span class="history-q"> ${s.question.slice(0, 42)}${s.question.length > 42 ? '…' : ''}</span></div>
+            ${s.final_decision && s.final_decision !== '（中断）' ? `<div class="history-decision">→ ${s.final_decision.slice(0,50)}${s.final_decision.length>50?'…':''}</div>` : s.final_decision === '（中断）' ? '<div class="history-decision" style="color:#E24B4A;">⏹ 中断</div>' : ''}
+          </div>
+          <button onclick="event.stopPropagation();deleteSession(${s.id})"
+            style="flex-shrink:0;padding:2px 6px;border-radius:4px;border:1px solid rgba(220,53,69,0.4);
+                   background:transparent;color:#dc3545;cursor:pointer;font-size:10px;line-height:1.4;">🗑️</button>
+        </div>
+        <div class="history-detail">
+          <div style="font-size:12px;color:var(--text);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border);">
+            <strong>相談内容：</strong>${s.question}
+          </div>
+          ${s.final_decision && s.final_decision !== '（中断）'
+            ? `<div style="margin-bottom:10px;padding:8px 10px;background:#1a2a1a;border:1px solid #1D9E75;border-radius:6px;">
+                <div style="font-size:10px;color:#1D9E75;font-weight:600;margin-bottom:4px;">💾 最終判断メモ</div>
+                <div style="font-size:12px;color:var(--text);line-height:1.6;white-space:pre-wrap;">${s.final_decision}</div>
+               </div>`
+            : ''}
+          ${adopted.length
+            ? `<div style="font-size:10px;color:#aaa;margin-bottom:6px;">📌 採用した回答</div>${adoptedHtml}`
+            : '<div style="font-size:11px;color:var(--muted);">採用した回答はありません</div>'}
         </div>
       </div>`;
     }).join('');
   } catch(e) {}
 }
 
+function toggleHistoryItem(el) {
+  el.classList.toggle('open');
+}
+
+async function deleteSession(sessionId) {
+  if(!confirm('この相談履歴を削除しますか？\n採用回答・評価データも含めて削除されます。')) return;
+  try {
+    const res  = await fetch(`/api/council/sessions/${sessionId}`, { method: 'DELETE' });
+    const data = await res.json();
+    if(data.status === 'ok') {
+      document.getElementById(`hsession-${sessionId}`)?.remove();
+      showToast('削除しました');
+    } else {
+      showToast('削除に失敗しました', true);
+    }
+  } catch(e) { showToast('通信エラー', true); }
+}
+
+async function rateAdopted(adoptedId, rating, starsEl) {
+  // 同じ評価をクリックしたら0にリセット
+  const current = parseInt(starsEl.dataset.rating) || 0;
+  const newRating = current === rating ? 0 : rating;
+  try {
+    await fetch(`/api/council/adopted/${adoptedId}/rating`, {
+      method: 'PUT',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ rating: newRating }),
+    });
+    starsEl.dataset.rating = newRating;
+    starsEl.querySelectorAll('.star').forEach((s, i) => {
+      s.classList.toggle('on', i < newRating);
+    });
+    showToast(newRating > 0 ? `★${newRating} 評価を保存しました` : '評価をリセットしました');
+  } catch(e) {
+    showToast('評価の保存に失敗しました', true);
+  }
+}
+
 async function loadCategories() {
   try {
     const cats = await (await fetch('/api/categories')).json();
-    document.getElementById('councilCategory').innerHTML =
-      cats.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+    const opts = cats.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+    document.getElementById('councilCategory').innerHTML = opts;
+    // 履歴フィルターにも追加
+    const histCat = document.getElementById('historyCategory');
+    if(histCat) histCat.innerHTML = '<option value="">カテゴリ: すべて</option>' + opts;
   } catch(e) {}
 }
 
 async function loadPersonaSettings() {
   try {
     const data = await (await fetch('/api/personas')).json();
-    data.forEach(p => { personaPresent[p.persona_name] = p.enabled === 1; });
+    PERSONA_DEFS.length = 0;
+    data.forEach(p => {
+      personaPresent[p.persona_name] = p.enabled === 1;
+      const key = PERSONA_IMG_MAP[p.persona_name] || p.persona_name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+      if(!PERSONA_DEFS.find(d => d.name === p.persona_name)) {
+        PERSONA_DEFS.push({ name: p.persona_name, key, role: p.role || '' });
+      } else {
+        const def = PERSONA_DEFS.find(d => d.name === p.persona_name);
+        if(def) def.role = p.role || def.role;
+      }
+    });
+    // カスタムアイコンを並行読み込み
+    await Promise.all(data.map(p => loadCustomIcon(p.persona_name)));
   } catch(e) {
     PERSONA_DEFS.forEach(p => { personaPresent[p.name] = true; });
   }
@@ -1208,8 +1703,31 @@ window.addEventListener('load', async () => {
   await loadPersonaSettings();
   await loadHistory();
   await loadContextData();
+  await checkUserProfile();
+  updateContextPanelHeight();
+
+  // Ollama切断時の相談内容はエラーモーダルの「再開」ボタンで復元するため
+  // ここでは自動復元しない
+
+  // RPGパネルの高さ変化を監視して参照パネルを追従させる
+  const rpg = document.getElementById('rpgPanel');
+  if(rpg && window.ResizeObserver) {
+    new ResizeObserver(() => {
+      if(rpg.classList.contains('visible')) updateContextPanelHeight();
+    }).observe(rpg);
+  }
 });
-window.addEventListener('resize', renderPersonaStage);
+
+// 画面リサイズ時に再計算
+window.addEventListener('resize', () => {
+  updateContextPanelHeight();
+});
+
+// ブラウザを閉じたときにOllama処理を中断（シャットダウンはしない）
+window.addEventListener('pagehide', () => {
+  clearConsultSession(); // ページ離脱 → セッション削除
+  navigator.sendBeacon('/api/ollama/abort', JSON.stringify({}));
+});
 </script>
 </body>
 </html>
