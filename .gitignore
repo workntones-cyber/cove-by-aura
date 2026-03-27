@@ -41,7 +41,6 @@ logs/
 dist/
 build/
 *.spec.bak
-cove.iconset/
 
 # ── macOS ─────────────────────────────────────────
 .DS_Store
