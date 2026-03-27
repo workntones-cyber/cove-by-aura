@@ -12,12 +12,20 @@
     /* ─── レイアウト基盤 ─── */
     .page-layout {
       display: block;
-      min-height: calc(100vh - 56px);
-      padding-top: 56px;
-      margin-right: 260px; /* 参照パネル分を確保 */
+      min-height: 100vh;
+      margin-right: 260px;
+    }
+    .input-fixed {
+      position: fixed;
+      top: 56px; left: 0; right: 260px;
+      z-index: 100;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 28px;
+      box-shadow: 0 2px 12px rgba(0,0,0,.2);
     }
     .main-col {
-      padding: 24px 28px 320px 28px;
+      padding: 0 28px 80px 28px;
     }
     /* ─── 右サイドパネル（完全固定） ─── */
     .context-panel {
@@ -213,8 +221,8 @@
     .rpg-panel {
       position: fixed; bottom: 0; left: 0; right: 0;
       height: 34vh; min-height: 220px; max-height: 60vh;
-      background: var(--surface); border-top: 2px solid var(--border);
-      box-shadow: 0 -6px 32px rgba(0,0,0,.1);
+      background: #1a1a2e; border-top: 2px solid var(--border);
+      box-shadow: 0 -8px 32px rgba(0,0,0,.6);
       z-index: 200; display: none; flex-direction: column;
     }
     .rpg-panel.visible { display: flex; }
@@ -360,14 +368,14 @@
 <div class="page-layout">
   <div class="main-col">
 
+    <!-- ① 入力エリア（ナビ直下固定） -->
+    <div class="input-fixed" id="inputFixed">
     <!-- 基本情報未登録バナー -->
-    <div id="profileBanner" style="display:none;background:#FAEEDA;border:1px solid #EF9F27;border-radius:10px;padding:10px 16px;margin-bottom:12px;font-size:12px;color:#854F0B;align-items:center;justify-content:space-between;">
+    <div id="profileBanner" style="display:none;background:#FAEEDA;border:1px solid #EF9F27;border-radius:10px;padding:8px 14px;margin-bottom:8px;font-size:12px;color:#854F0B;align-items:center;justify-content:space-between;">
       <span>⚠️ <strong>利用者情報が未登録です。</strong>登録すると相談の精度が上がります。</span>
       <a href="/vault" style="color:#7C6AF7;font-weight:600;text-decoration:none;white-space:nowrap;margin-left:12px;">保管庫で登録する →</a>
     </div>
-
-    <!-- ① 入力エリア -->
-    <div class="council-input-section">
+    <div class="council-input-section" style="margin-bottom:0;">
       <div class="council-input-row">
         <div class="council-input-main">
           <label class="c-label">照会内容</label>
@@ -389,9 +397,10 @@
         </div>
       </div>
     </div>
+    </div><!-- /input-fixed -->
 
     <!-- ② 会話ログエリア -->
-    <div id="conversationLog" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:16px 20px;margin-bottom:28px;max-height:420px;overflow-y:auto;">
+    <div id="conversationLog" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:16px 20px;margin-bottom:28px;max-height:calc(100vh - 300px);overflow-y:auto;">
       <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:12px;">📋 照会ログ</div>
       <div id="logList"></div>
     </div>
@@ -1142,7 +1151,7 @@ function updateAdoptedAnswersList() {
     ${adoptedPersonas.map(a => `
       <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;">
         <div style="font-size:11px;font-weight:600;color:#7C6AF7;margin-bottom:4px;">${a.name}（${PERSONA_DEFS.find(p=>p.name===a.name)?.role||''}）</div>
-        <div style="font-size:12px;color:var(--text);line-height:1.7;white-space:pre-wrap;">${a.answer}</div>
+        <div style="font-size:12px;color:var(--text);line-height:1.7;white-space:pre-wrap;max-height:300px;overflow-y:auto;">${a.answer}</div>
       </div>
     `).join('')}`;
 }
@@ -1723,22 +1732,36 @@ async function loadPersonaSettings() {
 window.addEventListener('load', async () => {
   await loadCategories();
   await loadContextData();
+  adjustMainPadding();
   updateContextPanelHeight();
 
-  // アーカイバーをPERSONA_DEFSに登録
   if(!PERSONA_DEFS.find(p => p.name === 'アーカイバー')) {
     PERSONA_DEFS.push({ name: 'アーカイバー', key: 'archiver', role: '情報抽出・記録整理' });
   }
   personaPresent['アーカイバー'] = true;
 
-  // RPGパネルの高さ変化を監視
   const rpg = document.getElementById('rpgPanel');
   if(rpg && window.ResizeObserver) {
     new ResizeObserver(() => {
       if(rpg.classList.contains('visible')) updateContextPanelHeight();
     }).observe(rpg);
   }
+
+  const inputFixed = document.getElementById('inputFixed');
+  if(inputFixed && window.ResizeObserver) {
+    new ResizeObserver(adjustMainPadding).observe(inputFixed);
+  }
 });
+
+function adjustMainPadding() {
+  requestAnimationFrame(() => {
+    const inputFixed = document.getElementById('inputFixed');
+    const mainCol    = document.querySelector('.main-col');
+    if(inputFixed && mainCol) {
+      mainCol.style.paddingTop = (inputFixed.offsetHeight + 4) + 'px';
+    }
+  });
+}
 
 window.addEventListener('resize', () => { updateContextPanelHeight(); });
 window.addEventListener('pagehide', () => {
@@ -1908,7 +1931,7 @@ function appendLog(type, text, question) {
 
   entry.innerHTML = `
     <div style="font-size:10px;font-weight:600;color:${color};margin-bottom:6px;">${label}</div>
-    <div style="font-size:13px;color:var(--text);line-height:1.8;white-space:pre-wrap;">${text}</div>
+    <div style="font-size:13px;color:var(--text);line-height:1.8;white-space:pre-wrap;max-height:400px;overflow-y:auto;">${text}</div>
     ${feedbackHtml}`;
 
   logList.appendChild(entry);

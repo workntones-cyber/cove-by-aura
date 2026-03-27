@@ -12,12 +12,21 @@
     /* ─── レイアウト基盤 ─── */
     .page-layout {
       display: block;
-      min-height: calc(100vh - 56px);
-      padding-top: 56px;
-      margin-right: 260px; /* 参照パネル分を確保 */
+      min-height: 100vh;
+      margin-right: 260px;
+    }
+    /* 入力エリア固定 */
+    .input-fixed {
+      position: fixed;
+      top: 56px; left: 0; right: 260px;
+      z-index: 100;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 28px;
+      box-shadow: 0 2px 12px rgba(0,0,0,.2);
     }
     .main-col {
-      padding: 24px 28px 320px 28px;
+      padding: 0 28px 80px 28px;
     }
     /* ─── 右サイドパネル（完全固定） ─── */
     .context-panel {
@@ -126,29 +135,34 @@
 
     /* ─── ペルソナエリア ─── */
     .persona-stage {
-      width: 100%; margin-bottom: 28px;
-      display: flex; flex-wrap: wrap; gap: 12px;
-      align-items: flex-start;
+      margin-bottom: 0;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 6px;
+      position: fixed;
+      left: 0; right: 260px;
+      z-index: 90;
+      background: var(--bg);
+      padding: 6px 28px 6px;
+      border-bottom: 1px solid var(--border);
     }
 
-    /* ペルソナカード：縦積み・枠を円形に */
+    /* ペルソナカード：横向き */
     .persona-card {
       background: var(--surface); border: 2px solid var(--border);
-      border-radius: 10px;
-      padding: 8px 6px 6px;
-      display: flex; flex-direction: column; align-items: center; gap: 4px;
-      text-align: center;
-      transition: border-color .4s, opacity .3s, transform .2s;
-      width: 170px !important; /* JS の CARD_W を上書き */
+      border-radius: 10px; padding: 8px 10px;
+      display: flex; flex-direction: row; align-items: center; gap: 10px;
+      transition: border-color .4s, opacity .3s;
+      min-width: 0;
     }
-    .persona-card:hover { transform: translateY(-2px); }
     .persona-card.absent   { opacity: .38; filter: grayscale(.8); }
     .persona-card.thinking { border-color: #FAC775; box-shadow: 0 0 0 3px #FAC77540; }
-    .persona-card.done     { border-color: #1D9E75; box-shadow: 0 0 0 3px #1D9E7530; }
+    .persona-card.done     { border-color: #1D9E75; box-shadow: 0 0 0 3px #1D9E7530; cursor: pointer; }
+    .persona-card.done:hover { border-color: #28c995; }
 
     /* 円形アバター */
     .p-avatar {
-      width: 72px; height: 72px; border-radius: 50%; flex-shrink: 0;
+      width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0;
       position: relative; overflow: hidden;
     }
     .p-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -158,16 +172,16 @@
     @keyframes db   { 0%,80%,100%{transform:translateY(0);opacity:.35} 40%{transform:translateY(-4px);opacity:1} }
     .persona-card.thinking .p-avatar { animation: sway 1.8s ease-in-out infinite; }
 
-    .p-info { display: flex; flex-direction: column; gap: 2px; width: 100%; }
-    .p-name { font-size: 11px; font-weight: 600; color: var(--text); }
-    .p-role { font-size: 9px; color: var(--muted); line-height: 1.3; }
-    .p-status { font-size: 9px; display: flex; align-items: center; justify-content: center; gap: 3px; }
+    .p-info { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+    .p-name { font-size: 11px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: visible; }
+    .p-role { font-size: 9px; color: var(--muted); line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .p-status { font-size: 9px; display: flex; align-items: center; gap: 3px; }
     .p-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--border); flex-shrink: 0; }
     .persona-card.thinking .p-dot { background: #FAC775; }
     .persona-card.done     .p-dot { background: #1D9E75; }
 
     .think-bubble {
-      display: none; position: absolute; top: -20px; left: 50%; transform: translateX(-50%);
+      display: none; position: absolute; top: -18px; left: 50%; transform: translateX(-50%);
       background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
       padding: 1px 5px; font-size: 9px; color: var(--muted); white-space: nowrap; z-index: 20;
     }
@@ -175,16 +189,34 @@
     .dot { display:inline-block;width:3px;height:3px;border-radius:50%;background:currentColor;margin:0 1.5px;animation:db 1.1s infinite; }
     .dot:nth-child(2){animation-delay:.18s} .dot:nth-child(3){animation-delay:.36s}
 
-    /* 入室/退室ボタン：カード下部 */
+    /* 入室/退室ボタン：カード右端 */
     .presence-btn {
-      width: 80%; padding: 2px 0; border-radius: 8px;
-      font-size: 8px; font-weight: 500; cursor: pointer;
+      padding: 6px 10px; border-radius: 8px; flex-shrink: 0;
+      font-size: 9px; font-weight: 600; cursor: pointer;
       font-family: inherit; transition: all .15s; border: 1px solid;
+      min-width: 52px; min-height: 36px;
     }
     .presence-btn.in  { background: transparent; border-color: var(--border); color: var(--muted); }
-    .presence-btn.in:hover { border-color: #E24B4A; color: #E24B4A; background: #FCEBEB; }
+    .presence-btn.in:hover { border-color: #E24B4A; color: #E24B4A; }
     .presence-btn.out { background: #E1F5EE; border-color: #1D9E75; color: #0F6E56; font-weight: 600; }
     .presence-btn.out:hover { background: #9FE1CB; }
+
+    /* ─── 会話ログエリア ─── */
+    .council-log {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 14px; padding: 16px 20px; margin-bottom: 24px;
+      max-height: calc(100vh - 340px); overflow-y: auto;
+    }
+    .council-log-title { font-size: 11px; font-weight: 600; color: var(--muted); margin-bottom: 12px; }
+    .log-entry { margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
+    .log-entry:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
+    .log-q { font-size: 10px; font-weight: 700; color: #7C6AF7; margin-bottom: 6px; }
+    .log-q-text { font-size: 13px; color: var(--text); line-height: 1.7; }
+    .log-answers { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+    .log-answer { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+    .log-answer-name { font-size: 10px; font-weight: 600; color: #1D9E75; margin-bottom: 4px; display:flex; align-items:center; gap:6px; }
+    .log-answer-text { font-size: 12px; color: var(--text); line-height: 1.7; white-space: pre-wrap; max-height: 200px; overflow-y: auto; }
+    .log-adopted-badge { font-size: 9px; background: #FAEEDA; color: #854F0B; border: 1px solid #EF9F27; border-radius: 4px; padding: 1px 6px; }
 
     /* アコーディオン（参照データパネル） */
     .ctx-accordion { margin-bottom: 10px; }
@@ -214,8 +246,8 @@
     .rpg-panel {
       position: fixed; bottom: 0; left: 0; right: 0;
       height: 34vh; min-height: 220px; max-height: 60vh;
-      background: var(--surface); border-top: 2px solid var(--border);
-      box-shadow: 0 -6px 32px rgba(0,0,0,.1);
+      background: #1a1a2e; border-top: 2px solid var(--border);
+      box-shadow: 0 -6px 32px rgba(0,0,0,.5);
       z-index: 200; display: none; flex-direction: column;
     }
     .rpg-panel.visible { display: flex; }
@@ -361,14 +393,14 @@
 <div class="page-layout">
   <div class="main-col">
 
+    <!-- ① 入力エリア（ナビ直下固定） -->
+    <div class="input-fixed" id="inputFixed">
     <!-- 基本情報未登録バナー -->
-    <div id="profileBanner" style="display:none;background:#FAEEDA;border:1px solid #EF9F27;border-radius:10px;padding:10px 16px;margin-bottom:12px;font-size:12px;color:#854F0B;align-items:center;justify-content:space-between;">
+    <div id="profileBanner" style="display:none;background:#FAEEDA;border:1px solid #EF9F27;border-radius:10px;padding:8px 14px;margin-bottom:8px;font-size:12px;color:#854F0B;align-items:center;justify-content:space-between;">
       <span>⚠️ <strong>利用者情報が未登録です。</strong>登録すると相談の精度が上がります。</span>
       <a href="/vault" style="color:#7C6AF7;font-weight:600;text-decoration:none;white-space:nowrap;margin-left:12px;">保管庫で登録する →</a>
     </div>
-
-    <!-- ① 入力エリア -->
-    <div class="council-input-section">
+    <div class="council-input-section" style="margin-bottom:0;">
       <div class="council-input-row">
         <div class="council-input-main">
           <label class="c-label">相談内容</label>
@@ -390,11 +422,18 @@
         </div>
       </div>
     </div>
+    </div><!-- /input-fixed -->
 
     <!-- ② ペルソナエリア -->
     <div class="persona-stage" id="personaStage"></div>
 
-    <!-- ③ 下段 -->
+    <!-- ③ 会話ログ -->
+    <div class="council-log" id="councilLog" style="display:none;">
+      <div class="council-log-title">💬 相談ログ</div>
+      <div id="councilLogList"></div>
+    </div>
+
+    <!-- ④ 下段 -->
     <div id="bottomArea">
       <div class="council-bottom">
         <div class="decision-section">
@@ -882,6 +921,8 @@ let rpgActiveList = [];
 let typingTimer = null;
 const shownAnswers = {};
 let sseAbortController = null; // SSE中断用
+let councilHistory = []; // 連続相談用会話履歴
+let _pendingLogQuestion = ''; // 現在の相談質問（ログ用）
 
 // 経過時間管理
 const personaStartTimes = {};  // name -> Date（思考開始時刻）
@@ -952,22 +993,33 @@ function renderPersonaStage() {
       });
     }
     div.innerHTML = `
-      <div style="position:relative;">
+      <div style="position:relative;flex-shrink:0;">
         ${st==='think'?`<div class="think-bubble"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>`:''}
         <div class="p-avatar">${buildAvatarHtml(p.name, st==='absent'?'wait':st)}</div>
-        ${clickable?`<div style="position:absolute;bottom:-2px;right:-2px;background:#1D9E75;color:#fff;border-radius:50%;width:18px;height:18px;font-size:10px;display:flex;align-items:center;justify-content:center;border:2px solid var(--surface);">▶</div>`:''}
       </div>
       <div class="p-info">
         <div class="p-name">${p.name}</div>
-        <div class="p-role">${p.role}</div>
-        <div class="p-status"><span class="p-dot"></span><span>${statusTxt}</span></div>
-      </div>
-      <button class="presence-btn ${presenceClass}" onclick="event.stopPropagation();togglePresence('${p.name}')">${presenceTxt}</button>`;
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:4px;margin-top:2px;">
+          <div style="display:flex;flex-direction:column;gap:1px;min-width:0;">
+            <div class="p-role">${p.role}</div>
+            <div class="p-status"><span class="p-dot"></span><span>${statusTxt}</span></div>
+          </div>
+          <button class="presence-btn ${presenceClass}" onclick="event.stopPropagation();togglePresence('${p.name}')">${presenceTxt}</button>
+        </div>
+      </div>`;
     stage.appendChild(div);
   });
+  // ペルソナ数変化後にレイアウトを再計算
+  adjustMainPadding();
 }
 
 function togglePresence(name) {
+  const current = PERSONA_DEFS.filter(p => p.name !== 'アーカイバー' && personaPresent[p.name] !== false).length;
+  // 入室しようとしている場合、14人上限チェック
+  if(!personaPresent[name] && current >= 14) {
+    showToast('ペルソナは最大14人までです', true);
+    return;
+  }
   personaPresent[name] = !personaPresent[name];
   renderPersonaStage();
 }
@@ -1127,6 +1179,15 @@ function closeRpgPanel() {
 
 // 相談終了：処理中でも中断して下段を表示し、履歴に保存
 async function endConsult() {
+  // 相談終了時に会話履歴をリセット
+  councilHistory = [];
+  _pendingLogQuestion = '';
+  // 会話ログを非表示
+  const logEl = document.getElementById('councilLog');
+  if(logEl) logEl.style.display = 'none';
+  const logList = document.getElementById('councilLogList');
+  if(logList) logList.innerHTML = '';
+  document.getElementById('councilQuestion').value = '';
   clearConsultSession(); // 手動終了 → セッション削除
   // SSE接続を中断（処理中の場合）
   if(sseAbortController) {
@@ -1301,6 +1362,34 @@ function adoptCurrent() {
   showToast(`${name} の回答を採用しました`);
 }
 
+// 会話ログに相談ラウンドを追記
+function appendCouncilLog(question, answers) {
+  const logEl   = document.getElementById('councilLog');
+  const logList = document.getElementById('councilLogList');
+  if(!logEl || !logList) return;
+  logEl.style.display = 'block';
+
+  const answersHtml = answers.filter(a => a.answer).map(a => {
+    const isAdopted = adoptedPersonas.some(ap => ap.name === a.name);
+    return `<div class="log-answer">
+      <div class="log-answer-name">
+        ${a.name}
+        ${isAdopted ? '<span class="log-adopted-badge">採用</span>' : ''}
+      </div>
+      <div class="log-answer-text">${a.answer}</div>
+    </div>`;
+  }).join('');
+
+  const entry = document.createElement('div');
+  entry.className = 'log-entry';
+  entry.innerHTML = `
+    <div class="log-q">🔍 相談</div>
+    <div class="log-q-text">${question}</div>
+    <div class="log-answers">${answersHtml}</div>`;
+  logList.appendChild(entry);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
 function updateAdoptedList() {
   const el = document.getElementById('adoptedList');
   el.innerHTML = adoptedPersonas.map(a => `<span class="adopted-tag">${a.name}</span>`).join('');
@@ -1344,10 +1433,11 @@ function startConsult() {
   Object.keys(personaElapsed).forEach(k => delete personaElapsed[k]);
   if(elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
   adoptedPersonas = [];
-  currentSessionId = null;
-  document.getElementById('decisionText').value = '';
+  // 連続相談：currentSessionIdとdecisionTextは維持（相談終了まで）
   updateAdoptedList();
   rpgIndex = 0;
+  // 今回の質問を会話ログに追加
+  _pendingLogQuestion = question;
 
   // 入室中のペルソナは全員いっせいに「考え中」にする
   rpgActiveList.forEach(name => { personaStates[name] = 'think'; });
@@ -1370,7 +1460,7 @@ function startConsult() {
   fetch('/api/council/ask', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question, category_id: categoryId, category_ids: getSelectedCategoryIds(), personas: rpgActiveList, context_keys: enabledKeys }),
+    body: JSON.stringify({ question, category_id: categoryId, category_ids: getSelectedCategoryIds(), personas: rpgActiveList, context_keys: enabledKeys, council_history: councilHistory }),
     signal: sseAbortController.signal,
   }).then(res => {
     const reader = res.body.getReader(), dec = new TextDecoder();
@@ -1438,6 +1528,15 @@ function handleSSE(obj) {
       if(elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
       document.getElementById('consultBtn').disabled = false;
       showToast('全員の回答が完了しました');
+      // 会話ログに今回のQ&Aを追記
+      appendCouncilLog(_pendingLogQuestion, rpgActiveList.map(name => ({ name, answer: personaAnswers[name]||'' })));
+      // 会話履歴に追加（連続相談用）
+      councilHistory.push({ role: 'user', content: _pendingLogQuestion });
+      rpgActiveList.forEach(name => {
+        if(personaAnswers[name]) councilHistory.push({ role: 'assistant', content: `[${name}] ${personaAnswers[name]}` });
+      });
+      // 入力欄をクリア
+      document.getElementById('councilQuestion').value = '';
       clearConsultSession(); // 正常完了 → セッション削除
       break;
     case 'error':
@@ -1653,7 +1752,7 @@ async function loadHistory() {
               ).join('')}
             </div>
           </div>
-          <div style="font-size:11px;color:var(--text);line-height:1.6;white-space:pre-wrap;">${a.answer.slice(0,200)}${a.answer.length>200?'…':''}</div>
+          <div style="font-size:11px;color:var(--text);line-height:1.6;white-space:pre-wrap;max-height:200px;overflow-y:auto;">${a.answer}</div>
         </div>`).join('');
       return `<div class="history-item" id="hsession-${s.id}">
         <div style="display:flex;align-items:flex-start;gap:4px;" onclick="toggleHistoryItem(this.parentElement)">
@@ -1841,22 +1940,47 @@ window.addEventListener('load', async () => {
   await loadHistory();
   await loadContextData();
   await checkUserProfile();
+  adjustMainPadding();
   updateContextPanelHeight();
 
-  // Ollama切断時の相談内容はエラーモーダルの「再開」ボタンで復元するため
-  // ここでは自動復元しない
-
-  // RPGパネルの高さ変化を監視して参照パネルを追従させる
   const rpg = document.getElementById('rpgPanel');
   if(rpg && window.ResizeObserver) {
     new ResizeObserver(() => {
       if(rpg.classList.contains('visible')) updateContextPanelHeight();
     }).observe(rpg);
   }
+
+  const inputFixed = document.getElementById('inputFixed');
+  if(inputFixed && window.ResizeObserver) {
+    new ResizeObserver(adjustMainPadding).observe(inputFixed);
+  }
 });
+
+function adjustMainPadding() {
+  requestAnimationFrame(() => {
+    const inputFixed   = document.getElementById('inputFixed');
+    const mainCol      = document.querySelector('.main-col');
+    const personaStage = document.getElementById('personaStage');
+    const councilLog   = document.getElementById('councilLog');
+    if(!inputFixed || !mainCol) return;
+
+    const inputH = inputFixed.offsetHeight;
+
+    // ペルソナステージをinput-fixedの直下に固定
+    if(personaStage) {
+      personaStage.style.top = (56 + inputH) + 'px';
+      // ペルソナステージの高さを取得してmain-colのpadding-topを設定
+      const personaH = personaStage.offsetHeight;
+      mainCol.style.paddingTop = (inputH + personaH + 8) + 'px';
+    } else {
+      mainCol.style.paddingTop = (inputH + 4) + 'px';
+    }
+  });
+}
 
 // 画面リサイズ時に再計算
 window.addEventListener('resize', () => {
+  adjustMainPadding();
   updateContextPanelHeight();
 });
 

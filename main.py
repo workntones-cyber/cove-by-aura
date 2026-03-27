@@ -1533,6 +1533,7 @@ def council_ask():
         category_ids  = [category_id]
     persona_names = data.get("personas", [])
     context_keys  = set(data.get("context_keys", None) or [])
+    council_history = data.get("council_history", [])  # 連続相談用会話履歴
     use_all_context = data.get("context_keys") is None
 
     if not question:
@@ -1749,17 +1750,22 @@ def council_ask():
                 try:
                     if ai_mode == "business":
                         # ── Ollama: /api/chat でロール分離 ──
+                        messages = [{"role": "system", "content": system_content}]
+                        # 連続相談の会話履歴を追加
+                        for h in council_history:
+                            role = h.get("role", "user")
+                            hcontent = h.get("content", "")
+                            if role in ("user", "assistant") and hcontent:
+                                messages.append({"role": role, "content": hcontent})
+                        messages.append({"role": "user", "content": user_content})
                         payload = _json.dumps({
                             "model": model,
-                            "messages": [
-                                {"role": "system", "content": system_content},
-                                {"role": "user",   "content": user_content},
-                            ],
+                            "messages": messages,
                             "stream": True,
                             "options": {
                                 "temperature": PERSONA_TEMPERATURE.get(persona_name, DEFAULT_TEMPERATURE),
                                 "num_predict": 1024,
-                                "num_ctx": 2048,
+                                "num_ctx": 4096,
                             },
                         }).encode("utf-8")
                         req = _ureq.Request(
