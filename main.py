@@ -45,6 +45,7 @@ from app.database import (
     get_highly_rated_answers,
     delete_council_session,
     get_context_for_category,
+    get_context_for_categories,
 )
 from app.services.recorder import delete_recording as delete_wav
 from app.services.recorder import get_status, list_recordings, start, stop
@@ -86,6 +87,173 @@ def council():
     """相談室画面"""
     return render_template("council.html", active_page="council")
 
+
+@app.route("/inquiry")
+def inquiry():
+    """照会室画面"""
+    return render_template("inquiry.html", active_page="inquiry")
+
+
+@app.route("/api/inquiry/ask", methods=["POST"])
+def inquiry_ask():
+    """
+    照会室：アーカイバーがSSEでストリーミング回答する
+    Request JSON: {
+        "question": str,
+        "category_id": int,
+        "context_keys": [...],
+        "history": [{"role": "user"|"assistant", "content": str}, ...]
+    }
+    """
+    import json as _json
+    import urllib.request as _ureq
+    from app.services.transcriber import _get_ollama_model
+    from flask import Response, stream_with_context
+
+    data         = request.get_json(silent=True) or {}
+    question     = data.get("question", "").strip()
+    # 複数カテゴリ対応：category_ids（リスト）を優先、なければcategory_id（単数）を使用
+    cat_ids_raw  = data.get("category_ids")
+    if cat_ids_raw:
+        category_ids = [int(c) for c in cat_ids_raw if c]
+    else:
+        category_ids = [int(data.get("category_id", 1) or 1)]
+    context_keys = set(data.get("context_keys", None) or [])
+    history      = data.get("history", [])  # 会話履歴
+    use_all_context = data.get("context_keys") is None
+
+    if not question:
+        return jsonify({"status": "error", "message": "照会内容を入力してください"}), 400
+
+    # コンテキスト収集（複数カテゴリ対応）
+    ctx = get_context_for_categories(category_ids)
+
+    def build_context_text():
+        if not use_all_context and not context_keys:
+            return ""
+
+        all_cats = get_all_categories()
+        cat_name_map = {c['id']: c['name'] for c in all_cats}
+        multi_cat = len(category_ids) > 1
+
+        def cat_label(item):
+            if not multi_cat:
+                return ""
+            cid = item.get('category_id')
+            return f"({cat_name_map.get(cid, f'カテゴリ{cid}')})" if cid else ""
+
+        parts = []
+        for r in ctx.get("recordings", []):
+            key = f"rec_{r['id']}"
+            if not use_all_context and key not in context_keys:
+                continue
+            if r.get("ai_summary"):
+                parts.append(f"[録音:{r['title']}{cat_label(r)}]\n{r['ai_summary'][:2000]}")
+        for m in ctx.get("memos", []):
+            key = f"memo_{m['id']}"
+            if not use_all_context and key not in context_keys:
+                continue
+            parts.append(f"[メモ:{m['title']}{cat_label(m)}]\n{m['body'][:2000]}")
+        for f in ctx.get("files", []):
+            key = f"file_{f['id']}"
+            if not use_all_context and key not in context_keys:
+                continue
+            if f.get("summary"):
+                parts.append(f"[ファイル:{f['original_name']}{cat_label(f)}]\n{f['summary'][:2000]}")
+        return "\n\n".join(parts)
+
+    context_text = build_context_text()
+
+    # アーカイバーのプロンプト取得
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT system_prompt FROM persona_settings WHERE persona_name='アーカイバー' LIMIT 1"
+        ).fetchone()
+    archiver_prompt = row["system_prompt"] if row else ""
+
+    def generate():
+        ollama_res = None
+        try:
+            env   = _read_env()
+            model = _get_ollama_model()
+
+            system_content = archiver_prompt
+            if context_text:
+                system_content += f"\n\n【参照データ】\n{context_text}"
+
+            # 会話履歴をmessages配列に組み立て
+            messages = [{"role": "system", "content": system_content}]
+            for h in history:
+                role    = h.get("role", "user")
+                content = h.get("content", "")
+                if role in ("user", "assistant") and content:
+                    messages.append({"role": role, "content": content})
+            messages.append({"role": "user", "content": question})
+
+            payload = _json.dumps({
+                "model":    model,
+                "messages": messages,
+                "stream":   True,
+                "options":  {"num_predict": 1024, "num_ctx": 8192, "temperature": 0.2},
+            }, ensure_ascii=False).encode("utf-8")
+
+            req = _ureq.Request(
+                "http://127.0.0.1:11434/api/chat",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+
+            full_answer = ""
+            with _ureq.urlopen(req, timeout=None) as ollama_res:
+                for line in ollama_res:
+                    line = line.decode("utf-8").strip()
+                    if not line:
+                        continue
+                    try:
+                        obj   = _json.loads(line)
+                        chunk = obj.get("message", {}).get("content", "")
+                        if chunk:
+                            full_answer += chunk
+                            yield f"data: {_json.dumps({'type': 'chunk', 'chunk': chunk}, ensure_ascii=False)}\n\n"
+                        if obj.get("done"):
+                            break
+                    except Exception:
+                        pass
+
+            yield f"data: {_json.dumps({'type': 'done', 'answer': full_answer}, ensure_ascii=False)}\n\n"
+
+        except GeneratorExit:
+            if ollama_res:
+                try: ollama_res.close()
+                except Exception: pass
+            return
+        except Exception as e:
+            err_msg = str(e)
+            print(f"[inquiry] エラー: {err_msg}")
+            yield f"data: {_json.dumps({'type': 'error', 'message': err_msg}, ensure_ascii=False)}\n\n"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.route("/api/inquiry/feedback", methods=["POST"])
+def inquiry_feedback():
+    """照会回答へのフィードバック（👍👎）を記録する"""
+    data     = request.get_json(silent=True) or {}
+    question = data.get("question", "").strip()
+    answer   = data.get("answer",   "").strip()
+    feedback = data.get("feedback", "")  # 'good' or 'bad'
+
+    if feedback not in ("good", "bad"):
+        return jsonify({"status": "error", "message": "feedback は good または bad"}), 400
+
+    print(f"[inquiry] フィードバック: {feedback} | Q: {question[:50]}")
+    # 将来DBに保存する場合はここに追加
+    return jsonify({"status": "ok"}), 200
 
 @app.route("/settings")
 def settings():
@@ -341,7 +509,7 @@ def vault_recording_upload():
             wav_path = UPLOADS_DIR / wav_name
             subprocess.run(
                 ["ffmpeg", "-y", "-i", str(save_path), str(wav_path)],
-                check=True, capture_output=True, timeout=120
+                check=True, capture_output=True, timeout=None
             )
             save_path.unlink(missing_ok=True)
         except Exception:
@@ -507,7 +675,7 @@ def vault_files_upload():
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            _conn2 = _ureq2.urlopen(_req2, timeout=300)
+            _conn2 = _ureq2.urlopen(_req2, timeout=None)
             try:
                 if abort_ev.is_set():
                     _conn2.close()
@@ -1355,64 +1523,66 @@ def council_ask():
 
     data          = request.get_json(silent=True) or {}
     question      = data.get("question", "").strip()
-    category_id   = int(data.get("category_id", 1) or 1)
+    # 複数カテゴリ対応
+    cat_ids_raw   = data.get("category_ids")
+    if cat_ids_raw:
+        category_ids  = [int(c) for c in cat_ids_raw if c]
+        category_id   = category_ids[0]
+    else:
+        category_id   = int(data.get("category_id", 1) or 1)
+        category_ids  = [category_id]
     persona_names = data.get("personas", [])
     context_keys  = set(data.get("context_keys", None) or [])
-    # context_keys が None または未送信 → 全て使う
-    # context_keys が空リスト [] → 全てOFF（何も渡さない）
-    use_all_context = data.get("context_keys") is None  # キー自体がなければ全使用
+    use_all_context = data.get("context_keys") is None
 
     if not question:
         return jsonify({"status": "error", "message": "質問を入力してください"}), 400
     if not persona_names:
         return jsonify({"status": "error", "message": "参加ペルソナがいません"}), 400
 
-    # ── コンテキスト収集（context_keys でフィルタリング）──
-    ctx = get_context_for_category(category_id)
+    # ── コンテキスト収集（複数カテゴリ対応）──
+    ctx = get_context_for_categories(category_ids)
 
     def build_context_text():
-        # 全部OFFの場合は空を返す
         if not use_all_context and not context_keys:
             return ""
+
+        # カテゴリIDと名前のマップを作成
+        all_cats = get_all_categories()
+        cat_name_map = {c['id']: c['name'] for c in all_cats}
+        multi_cat = len(category_ids) > 1  # 複数カテゴリ選択中かどうか
+
+        def cat_label(item):
+            if not multi_cat:
+                return ""
+            cid = item.get('category_id')
+            return f"({cat_name_map.get(cid, f'カテゴリ{cid}')})" if cid else ""
+
         parts = []
         for r in ctx.get("recordings", []):
             key = f"rec_{r['id']}"
             if not use_all_context and key not in context_keys:
                 continue
             if r.get("ai_summary"):
-                parts.append(f"[録音:{r['title']}]\n{r['ai_summary'][:1000]}")
+                parts.append(f"[録音:{r['title']}{cat_label(r)}]\n{r['ai_summary'][:1000]}")
         for m in ctx.get("memos", []):
             key = f"memo_{m['id']}"
             if not use_all_context and key not in context_keys:
                 continue
-            parts.append(f"[メモ:{m['title']}]\n{m['body'][:1000]}")
+            parts.append(f"[メモ:{m['title']}{cat_label(m)}]\n{m['body'][:1000]}")
         for f in ctx.get("files", []):
             key = f"file_{f['id']}"
             if not use_all_context and key not in context_keys:
                 continue
             if f.get("summary"):
-                parts.append(f"[ファイル:{f['original_name']}]\n{f['summary'][:1000]}")
+                parts.append(f"[ファイル:{f['original_name']}{cat_label(f)}]\n{f['summary'][:1000]}")
         for s in ctx.get("sessions", []):
             if s.get("final_decision"):
-                parts.append(f"[過去の決定] 質問:{s['question']} → {s['final_decision']}")
+                label = cat_label(s)
+                parts.append(f"[過去の決定{label}] 質問:{s['question']} → {s['final_decision']}")
         return "\n\n".join(parts)
 
     context_text = build_context_text()
-
-    # ── 利用者情報（「利用者情報」カテゴリのメモ）を常に追加 ──
-    user_profile_text = ""
-    try:
-        all_cats = get_all_categories()
-        user_cat = next((c for c in all_cats if c['name'] == '利用者情報'), None)
-        if user_cat:
-            user_memos = get_all_vault_memos(category_id=user_cat['id'])
-            if user_memos:
-                parts = ["【利用者基本情報】"]
-                for m in user_memos:
-                    parts.append(f"{m['title']}: {m['body'][:500]}")
-                user_profile_text = "\n".join(parts)
-    except Exception:
-        pass
 
     # ── 関連性フィルタリング：質問と無関係なコンテキストを除外 ──
     def filter_relevant_context(question: str, raw_context: str, env: dict) -> str:
@@ -1550,15 +1720,7 @@ def council_ask():
                 # ── user メッセージ：情報を明確に分離して構造化 ──
                 parts_msg = []
 
-                # ① 相談者の基本情報（常に最初に・カテゴリ非依存）
-                if user_profile_text:
-                    parts_msg.append(
-                        "■ 相談者の基本情報\n"
-                        "以下は相談者本人に関する固定情報です。回答の前提として必ず考慮してください。\n"
-                        f"{user_profile_text}"
-                    )
-
-                # ② 関連性フィルタ済みのカテゴリ参考情報のみ渡す
+                # ① 関連性フィルタ済みのカテゴリ参考情報のみ渡す
                 if filtered_context:
                     parts_msg.append(
                         "■ 参考情報（相談内容に関連すると判断されたデータ）\n"

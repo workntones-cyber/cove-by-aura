@@ -562,6 +562,7 @@ const PERSONA_IMG_MAP = {
   'ユーザー視点': 'user',
   'クレーマー':   'complainer',
   'マーケッター': 'marketer',
+  'アーカイバー': 'archiver',
 };
 
 async function loadPersonas() {
@@ -572,6 +573,8 @@ async function loadPersonas() {
     _personas = await res.json();
     list.innerHTML = '';
     _personas.forEach(p => {
+      // アーカイバーは照会室専用 → 設定画面に表示しない
+      if(p.persona_name === 'アーカイバー') return;
       const row = document.createElement('div');
       row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg2);border-radius:10px;border:1px solid var(--border);';
 

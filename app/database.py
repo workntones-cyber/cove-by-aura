@@ -244,18 +244,37 @@ def init_db() -> None:
 📣 差別化メッセージ：（競合が言っていない・言えないことを一言で。キャッチコピー形式）
 
 【禁止】前置き・「認知度向上」・抽象的な施策・根拠のない楽観論・法律・リスク論・300字超過"""),
+
+            ("アーカイバー", "情報抽出・記録整理", """あなたは情報管理の専門家だ。保管庫・録音データ・メモ・Webデータから必要な情報だけを抽出して整理する。意見は言わない。事実だけを返す。
+
+【思考の癖】
+相談内容に関係する情報を記録の中から拾い上げる。重複・冗長・無関係な情報は切り捨てる。「何が言われたか」「何が決まったか」「何が数字として残っているか」だけを見る。解釈は加えない。ただし記録の中に矛盾・異常値・見落とされやすい重要事項を発見したときだけ、最後に一言添える。
+
+【出力形式・厳守】
+🗂 抽出情報：
+・（関連する事実・記録・発言を箇条書きで。出典（録音/メモ/Web）を括弧で添える）
+・（複数ある場合はすべて列挙。重要度順）
+
+⚠ 気になる点：（矛盾・見落とし・異常値を発見した場合のみ記載。なければこの項目は出力しない）
+
+【禁止】前置き・意見・推測・提案・感情語・「〜すべき」・見解の押しつけ・400字超過"""),
         ]
         for name, role, prompt in default_personas:
+            # アーカイバーは照会室専用なので enabled=0（相談室・設定に表示しない）
+            default_enabled = 0 if name == 'アーカイバー' else 1
             conn.execute(
-                "INSERT OR IGNORE INTO persona_settings (persona_name, role, system_prompt, enabled) VALUES (?, ?, ?, 1)",
-                (name, role, prompt)
+                "INSERT OR IGNORE INTO persona_settings (persona_name, role, system_prompt, enabled) VALUES (?, ?, ?, ?)",
+                (name, role, prompt, default_enabled)
             )
-            # デフォルトペルソナは常に最新プロンプトに更新（手動編集していない場合）
-            # ※設定画面で手動編集した場合は上書きされる
             conn.execute(
                 "UPDATE persona_settings SET role=?, system_prompt=? WHERE persona_name=?",
                 (role, prompt, name)
             )
+
+        # アーカイバーは照会室専用 → 常にenabled=0を維持
+        conn.execute(
+            "UPDATE persona_settings SET enabled=0 WHERE persona_name='アーカイバー'"
+        )
 
         # ── 相談室：セッションテーブル ────────────
         conn.execute("""
@@ -817,6 +836,44 @@ def get_context_for_category(category_id: int) -> dict:
                WHERE cs.category_id = ?
                ORDER BY cs.created_at DESC LIMIT 5""",
             (category_id,)
+        ).fetchall()
+
+    return {
+        "recordings": [dict(r) for r in recordings],
+        "memos":      [dict(m) for m in memos],
+        "files":      [dict(f) for f in files],
+        "sessions":   [dict(s) for s in sessions],
+    }
+
+
+def get_context_for_categories(category_ids: list) -> dict:
+    """複数カテゴリに紐づくコンテキストデータを収集する"""
+    if not category_ids:
+        return {"recordings": [], "memos": [], "files": [], "sessions": []}
+    if len(category_ids) == 1:
+        return get_context_for_category(category_ids[0])
+
+    placeholders = ",".join("?" * len(category_ids))
+    with get_connection() as conn:
+        recordings = conn.execute(
+            f"SELECT id, title, ai_summary, category_id FROM recordings WHERE category_id IN ({placeholders}) AND ai_summary != '' ORDER BY created_at DESC LIMIT 20",
+            category_ids
+        ).fetchall()
+        memos = conn.execute(
+            f"SELECT id, title, body, category_id FROM vault_memos WHERE category_id IN ({placeholders}) ORDER BY created_at DESC LIMIT 20",
+            category_ids
+        ).fetchall()
+        files = conn.execute(
+            f"SELECT id, original_name, summary, category_id FROM vault_files WHERE category_id IN ({placeholders}) AND summary != '' ORDER BY created_at DESC LIMIT 20",
+            category_ids
+        ).fetchall()
+        sessions = conn.execute(
+            f"""SELECT cs.question, cs.final_decision, ca.persona_name, ca.answer, cs.category_id
+               FROM council_sessions cs
+               LEFT JOIN council_adopted ca ON ca.session_id = cs.id
+               WHERE cs.category_id IN ({placeholders})
+               ORDER BY cs.created_at DESC LIMIT 10""",
+            category_ids
         ).fetchall()
 
     return {

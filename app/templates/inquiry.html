@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <title>COVE - 相談室</title>
+  <title>COVE - 照会室</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="icon" type="image/x-icon" href="/static/cove.ico">
@@ -76,11 +76,10 @@
     .council-input-section {
       background: var(--surface); border: 1px solid var(--border);
       border-radius: 16px; padding: 18px 22px 16px; margin-bottom: 28px;
-      overflow: visible;
     }
     .council-input-row { display: flex; gap: 16px; align-items: flex-start; }
     .council-input-main { flex: 1; }
-    .council-input-side { min-width: 240px; display: flex; flex-direction: column; gap: 8px; overflow: visible; position: relative; }
+    .council-input-side { min-width: 170px; display: flex; flex-direction: column; gap: 8px; }
     .c-label { font-size: 11px; color: var(--muted); margin-bottom: 4px; display: block; }
     .c-select {
       width: 100%; background: var(--bg); border: 1px solid var(--border);
@@ -371,9 +370,9 @@
     <div class="council-input-section">
       <div class="council-input-row">
         <div class="council-input-main">
-          <label class="c-label">相談内容</label>
+          <label class="c-label">照会内容</label>
           <textarea class="c-textarea" id="councilQuestion"
-            placeholder="相談内容を入力してください…"></textarea>
+            placeholder="例：先月の会議で決まったことは？　重要な数字は？"></textarea>
         </div>
         <div class="council-input-side">
           <div>
@@ -386,50 +385,15 @@
               <div class="multi-cat-dropdown" id="multiCatDropdown"></div>
             </div>
           </div>
-          <button class="c-btn" id="consultBtn" onclick="startConsult()">相談する →</button>
+          <button class="c-btn" id="consultBtn" onclick="startInquiry()">🔍 照会する</button>
         </div>
       </div>
     </div>
 
-    <!-- ② ペルソナエリア -->
-    <div class="persona-stage" id="personaStage"></div>
-
-    <!-- ③ 下段 -->
-    <div id="bottomArea">
-      <div class="council-bottom">
-        <div class="decision-section">
-          <div class="section-title">最終判断メモ</div>
-          <!-- 採用回答一覧 -->
-          <div id="adoptedAnswersList" style="display:none;margin-bottom:12px;"></div>
-          <!-- 採用タグ -->
-          <div class="adopted-list" id="adoptedList" style="display:none;"></div>
-          <textarea class="decision-textarea" id="decisionText"
-            placeholder="採用した意終判断を記入…"></textarea>
-          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">
-            <button class="save-decision-btn" onclick="saveSession()">💾 保存する</button>
-          </div>
-        </div>
-        <div class="history-section">
-          <div class="section-title">📋 相談履歴</div>
-          <!-- 検索・フィルター -->
-          <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">
-            <input id="historyKeyword" type="text" placeholder="🔍 キーワード検索…"
-              class="c-textarea" style="height:32px;padding:5px 10px;font-size:12px;"
-              oninput="debounceHistorySearch()"/>
-            <div style="display:flex;gap:6px;">
-              <select id="historyCategory" class="c-select" style="flex:1;font-size:12px;"
-                onchange="loadHistory()">
-                <option value="">カテゴリ: すべて</option>
-              </select>
-              <input id="historyDateFrom" type="date" class="c-select" style="font-size:11px;"
-                onchange="loadHistory()"/>
-              <input id="historyDateTo" type="date" class="c-select" style="font-size:11px;"
-                onchange="loadHistory()"/>
-            </div>
-          </div>
-          <div id="historyList"><div class="history-empty">まだ相談履歴がありません</div></div>
-        </div>
-      </div>
+    <!-- ② 会話ログエリア -->
+    <div id="conversationLog" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:16px 20px;margin-bottom:28px;max-height:420px;overflow-y:auto;">
+      <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:12px;">📋 照会ログ</div>
+      <div id="logList"></div>
     </div>
 
   </div><!-- /main-col -->
@@ -438,7 +402,7 @@
 
 <!-- 右サイドパネル：参照データ（fixed配置・page-layoutの外） -->
 <div class="context-panel" id="contextPanel">
-  <div class="ctx-title">🗂 ペルソナが参照するデータ</div>
+  <div class="ctx-title">🗂 アーカイバーが参照するデータ</div>
   <div id="ctxContent"><div class="ctx-empty">カテゴリを選択してください</div></div>
 </div>
 
@@ -452,10 +416,6 @@
       </div>
     </div>
     <div class="rpg-nav">
-      <button class="rpg-nav-btn" id="rpgPrev" onclick="rpgNav(-1)">◀</button>
-      <span class="rpg-counter" id="rpgCounter">- / -</span>
-      <button class="rpg-nav-btn" id="rpgNext" onclick="rpgNav(1)">▶</button>
-      <button class="rpg-end-btn" onclick="endConsult()" title="相談を終了して保存エリアを表示">相談終了</button>
       <button class="rpg-close-btn" onclick="closeRpgPanel()" title="閉じる">✕</button>
     </div>
   </div>
@@ -463,7 +423,6 @@
     <div class="rpg-char">
       <div class="rpg-char-face" id="rpgFace"></div>
       <div id="rpgElapsed" style="font-size:11px;color:var(--muted);margin-top:4px;text-align:center;min-height:16px;"></div>
-      <button class="rpg-adopt-btn" id="rpgAdoptBtn" onclick="adoptCurrent()">採用する ✓</button>
     </div>
     <div class="rpg-text-area" id="rpgTextArea">
       <div class="rpg-thinking-indicator" id="rpgThinking" style="display:none;">
@@ -922,12 +881,9 @@ function updateElapsedDisplay() {
 // ══════════════════════════════════════════════════
 function renderPersonaStage() {
   const stage = document.getElementById('personaStage');
-  stage.innerHTML = '';
+  stage.innerHTML = ''; // flex子要素として直接追加
 
   PERSONA_DEFS.forEach((p, i) => {
-    // アーカイバーは照会室専用 → 相談室に表示しない
-    if(p.name === 'アーカイバー') return;
-
     const present = personaPresent[p.name] !== false;
     const state   = personaStates[p.name] || 'wait';
     const st      = present ? state : 'absent';
@@ -999,7 +955,6 @@ async function loadContextData() {
   content.innerHTML = '<div class="ctx-empty">読み込み中…</div>';
 
   try {
-    // 全カテゴリのデータを並行取得
     const catResults = await Promise.all(catIds.map(async catId => {
       const [recs, memos, files] = await Promise.all([
         fetch(`/api/recordings?category_id=${catId}`).then(r=>r.json()).catch(()=>[]),
@@ -1009,10 +964,8 @@ async function loadContextData() {
       return { catId, recs, memos, files };
     }));
 
-    // カテゴリ名を取得
     const cats = await fetch('/api/categories').then(r=>r.json()).catch(()=>[]);
     const catNameMap = Object.fromEntries(cats.map(c=>[c.id, c.name]));
-
     const multiCat = catIds.length > 1;
     let html = '';
 
@@ -1023,17 +976,14 @@ async function loadContextData() {
         { icon:'📝', label:'メモ',    items: memos.map(m=>({                       key:`memo_${m.id}`, title:m.title||'無題', sub:'', preview:m.body })) },
         { icon:'📁', label:'ファイル', items: files.filter(f=>f.summary).map(f=>({ key:`file_${f.id}`, title:f.original_name||'無題', sub:f.filetype||'', preview:f.summary })) },
       ];
-
       const hasData = sections.some(s => s.items.length > 0);
       if(!hasData) {
         if(multiCat) html += `<div class="ctx-empty" style="font-size:11px;padding:6px 4px;">📂 ${catName}：データなし</div>`;
         return;
       }
-
       if(multiCat) {
         html += `<div style="font-size:10px;font-weight:700;color:var(--accent);padding:10px 4px 4px;border-top:1px solid var(--border);margin-top:4px;">📂 ${catName}</div>`;
       }
-
       sections.forEach(sec => {
         if(!sec.items.length) return;
         html += `<div class="ctx-accordion">
@@ -1117,11 +1067,14 @@ function updateContextPanelHeight() {
 
 function openRpgPanel() {
   document.getElementById('rpgPanel').classList.add('visible');
-  document.getElementById('bottomArea').style.display = 'none';
+  const ba = document.getElementById('bottomArea');
+  if(ba) ba.style.display = 'none';
   updateContextPanelHeight();
 }
 function closeRpgPanel() {
   document.getElementById('rpgPanel').classList.remove('visible');
+  const ba = document.getElementById('bottomArea');
+  if(ba) ba.style.display = '';
   updateContextPanelHeight();
 }
 
@@ -1213,61 +1166,6 @@ function rpgNav(dir) {
   rpgShowCurrent();
 }
 
-function rpgShowCurrent() {
-  const name  = rpgActiveList[rpgIndex];
-  const p     = PERSONA_DEFS.find(x => x.name === name);
-  const state = personaStates[name] || 'wait';
-  const ans   = personaAnswers[name] || '';
-
-  document.getElementById('rpgCounter').textContent = `${rpgIndex+1} / ${rpgActiveList.length}`;
-  document.getElementById('rpgPrev').disabled = rpgIndex === 0;
-  document.getElementById('rpgNext').disabled = rpgIndex === rpgActiveList.length-1;
-  document.getElementById('rpgName').textContent = p ? p.name : '—';
-  document.getElementById('rpgRole').textContent = p ? p.role : '';
-  updateElapsedDisplay();
-
-  const faceEl = document.getElementById('rpgFace');
-  faceEl.innerHTML = buildAvatarHtml(name, state);
-  faceEl.className = `rpg-char-face ${state==='think'?'thinking-face':state==='done'?'done-face':''}`;
-
-  const adoptBtn = document.getElementById('rpgAdoptBtn');
-  const isAdopted = adoptedPersonas.some(a => a.name === name);
-  if(state !== 'done' || !ans) {
-    adoptBtn.style.display = 'none';
-  } else {
-    adoptBtn.style.display = '';
-    adoptBtn.className = `rpg-adopt-btn${isAdopted?' adopted':''}`;
-    adoptBtn.textContent = isAdopted ? '採用済み ★' : '採用する ✓';
-    adoptBtn.disabled = isAdopted;
-  }
-
-  const thinkEl = document.getElementById('rpgThinking');
-  const textEl  = document.getElementById('rpgAnswerText');
-
-  if(state === 'think') {
-    thinkEl.style.display = 'flex';
-    textEl.innerHTML = '';
-  } else if(state === 'done' && ans) {
-    thinkEl.style.display = 'none';
-    // ★ 修正：一度表示済みの回答はそのまま。未表示のみタイプライター
-    if(shownAnswers[name] === ans) {
-      // 既に表示済み → そのまま維持（何もしない。textElはすでに内容がある）
-      if(!textEl.textContent || textEl.dataset.persona !== name) {
-        textEl.textContent = ans;
-        textEl.dataset.persona = name;
-      }
-    } else {
-      // 初めて表示 → タイプライターで表示し、完了後に記録
-      textEl.dataset.persona = name;
-      typeText(textEl, ans, () => { shownAnswers[name] = ans; });
-    }
-  } else {
-    thinkEl.style.display = 'none';
-    textEl.textContent = '考え中…';
-    textEl.dataset.persona = '';
-  }
-}
-
 function typeText(el, text, onDone) {
   if(typingTimer) { clearInterval(typingTimer); typingTimer = null; }
   el.textContent = '';
@@ -1314,8 +1212,8 @@ function startConsult() {
   const question = document.getElementById('councilQuestion').value.trim();
   if(!question) { showToast('相談内容を入力してください', true); return; }
 
-  const categoryId = getSelectedCategoryIds()[0]; // 後方互換用
-  rpgActiveList = PERSONA_DEFS.filter(p => p.name !== 'アーカイバー' && personaPresent[p.name] !== false).map(p => p.name);
+  const categoryId = parseInt(document.getElementById('councilCategory').value) || 1;
+  rpgActiveList = PERSONA_DEFS.filter(p => personaPresent[p.name] !== false).map(p => p.name);
   if(!rpgActiveList.length) { showToast('入室中のペルソナがいません', true); return; }
 
   // 🧪 動作検証フラグのチェック
@@ -1370,7 +1268,7 @@ function startConsult() {
   fetch('/api/council/ask', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question, category_id: categoryId, category_ids: getSelectedCategoryIds(), personas: rpgActiveList, context_keys: enabledKeys }),
+    body: JSON.stringify({ question, category_id: categoryId, personas: rpgActiveList, context_keys: enabledKeys }),
     signal: sseAbortController.signal,
   }).then(res => {
     const reader = res.body.getReader(), dec = new TextDecoder();
@@ -1586,7 +1484,7 @@ function clearConsultSession() {
 // ══════════════════════════════════════════════════
 async function saveSession() {
   const question = document.getElementById('councilQuestion').value.trim();
-  const catId    = getSelectedCategoryIds()[0];
+  const catId    = parseInt(document.getElementById('councilCategory').value) || 1;
   const decision = document.getElementById('decisionText').value.trim();
   if(!question) { showToast('相談内容がありません', true); return; }
   // adoptedPersonas は {name, answer} 形式 → APIは {persona_name, answer} を期待
@@ -1722,18 +1620,12 @@ async function rateAdopted(adoptedId, rating, starsEl) {
   }
 }
 
-// 選択中カテゴリIDリスト
 let selectedCategoryIds = [1];
 
 async function loadCategories() {
   try {
     const cats = await (await fetch('/api/categories')).json();
-    // 複数カテゴリドロップダウンを構築
     buildCatDropdown(cats);
-    // 履歴フィルターにも追加
-    const opts = cats.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
-    const histCat = document.getElementById('historyCategory');
-    if(histCat) histCat.innerHTML = '<option value="">カテゴリ: すべて</option>' + opts;
   } catch(e) {}
 }
 
@@ -1765,7 +1657,6 @@ function toggleCatDropdown() {
   if(!dd) return;
   dd.classList.toggle('open');
   if(dd.classList.contains('open')) {
-    // 外クリックで閉じる
     setTimeout(() => {
       document.addEventListener('click', closeCatDropdown, { once: true });
     }, 0);
@@ -1777,7 +1668,6 @@ function closeCatDropdown(e) {
   if(wrap && !wrap.contains(e.target)) {
     document.getElementById('multiCatDropdown')?.classList.remove('open');
   } else {
-    // wrap内クリックなら再登録
     setTimeout(() => {
       document.addEventListener('click', closeCatDropdown, { once: true });
     }, 0);
@@ -1788,7 +1678,6 @@ function onCatChange() {
   const checks = document.querySelectorAll('#multiCatDropdown input[type=checkbox]:checked');
   selectedCategoryIds = [...checks].map(c => parseInt(c.value));
   if(!selectedCategoryIds.length) {
-    // 最低1つ選択
     const first = document.querySelector('#multiCatDropdown input[type=checkbox]');
     if(first) { first.checked = true; selectedCategoryIds = [parseInt(first.value)]; }
   }
@@ -1814,11 +1703,6 @@ async function loadPersonaSettings() {
     const data = await (await fetch('/api/personas')).json();
     PERSONA_DEFS.length = 0;
     data.forEach(p => {
-      // アーカイバーは照会室専用 → 相談室に表示しない
-      if(p.persona_name === 'アーカイバー') {
-        personaPresent['アーカイバー'] = false;
-        return;
-      }
       personaPresent[p.persona_name] = p.enabled === 1;
       const key = PERSONA_IMG_MAP[p.persona_name] || p.persona_name.toLowerCase().replace(/[^a-z0-9]/g, '_');
       if(!PERSONA_DEFS.find(d => d.name === p.persona_name)) {
@@ -1828,6 +1712,7 @@ async function loadPersonaSettings() {
         if(def) def.role = p.role || def.role;
       }
     });
+    // カスタムアイコンを並行読み込み
     await Promise.all(data.map(p => loadCustomIcon(p.persona_name)));
   } catch(e) {
     PERSONA_DEFS.forEach(p => { personaPresent[p.name] = true; });
@@ -1837,16 +1722,16 @@ async function loadPersonaSettings() {
 
 window.addEventListener('load', async () => {
   await loadCategories();
-  await loadPersonaSettings();
-  await loadHistory();
   await loadContextData();
-  await checkUserProfile();
   updateContextPanelHeight();
 
-  // Ollama切断時の相談内容はエラーモーダルの「再開」ボタンで復元するため
-  // ここでは自動復元しない
+  // アーカイバーをPERSONA_DEFSに登録
+  if(!PERSONA_DEFS.find(p => p.name === 'アーカイバー')) {
+    PERSONA_DEFS.push({ name: 'アーカイバー', key: 'archiver', role: '情報抽出・記録整理' });
+  }
+  personaPresent['アーカイバー'] = true;
 
-  // RPGパネルの高さ変化を監視して参照パネルを追従させる
+  // RPGパネルの高さ変化を監視
   const rpg = document.getElementById('rpgPanel');
   if(rpg && window.ResizeObserver) {
     new ResizeObserver(() => {
@@ -1855,16 +1740,206 @@ window.addEventListener('load', async () => {
   }
 });
 
-// 画面リサイズ時に再計算
-window.addEventListener('resize', () => {
-  updateContextPanelHeight();
-});
-
-// ブラウザを閉じたときにOllama処理を中断（シャットダウンはしない）
+window.addEventListener('resize', () => { updateContextPanelHeight(); });
 window.addEventListener('pagehide', () => {
-  clearConsultSession(); // ページ離脱 → セッション削除
   navigator.sendBeacon('/api/ollama/abort', JSON.stringify({}));
 });
+
+// ══════════════════════════════════════════════════
+//  照会室専用：rpgShowCurrentを上書き
+// ══════════════════════════════════════════════════
+// 会話履歴（APIに渡す用）
+let conversationHistory = [];
+
+function rpgShowCurrent() {
+  const name  = 'アーカイバー';
+  const state = personaStates[name] || 'wait';
+  const ans   = personaAnswers[name] || '';
+
+  // ヘッダー
+  document.getElementById('rpgName').textContent = 'アーカイバー';
+  document.getElementById('rpgRole').textContent = '情報抽出・記録整理';
+
+  // アバター
+  const faceEl = document.getElementById('rpgFace');
+  if(faceEl) {
+    faceEl.innerHTML   = buildAvatarHtml(name, state);
+    faceEl.className   = `rpg-char-face ${state==='think'?'thinking-face':state==='done'?'done-face':''}`;
+  }
+
+  // テキストエリア
+  const thinkEl = document.getElementById('rpgThinking');
+  const textEl  = document.getElementById('rpgAnswerText');
+  if(state === 'think' && !ans) {
+    if(thinkEl) thinkEl.style.display = 'flex';
+    if(textEl)  textEl.textContent = '';
+  } else {
+    if(thinkEl) thinkEl.style.display = 'none';
+    if(textEl)  textEl.textContent = ans;
+  }
+}
+
+// ══════════════════════════════════════════════════
+//  照会室専用：照会実行
+// ══════════════════════════════════════════════════
+let inquirySseController = null;
+
+async function startInquiry() {
+  const questionEl = document.getElementById('councilQuestion');
+  const question   = questionEl.value.trim();
+  if(!question) { showToast('照会内容を入力してください', true); return; }
+
+  const catId       = getSelectedCategoryIds()[0];
+  const contextKeys = getEnabledContextKeys();
+
+  // 入力欄クリア・ボタン無効化
+  questionEl.value = '';
+  document.getElementById('consultBtn').disabled = true;
+
+  // 会話ログに質問を追加
+  appendLog('Q', question);
+
+  // RPGパネルを開く
+  rpgActiveList = ['アーカイバー'];
+  rpgIndex      = 0;
+  personaStates['アーカイバー']  = 'think';
+  personaAnswers['アーカイバー'] = '';
+  openRpgPanel();
+  rpgShowCurrent();
+
+  // 既存SSEを中断
+  if(inquirySseController) inquirySseController.abort();
+  inquirySseController = new AbortController();
+
+  try {
+    const res = await fetch('/api/inquiry/ask', {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify({
+        question,
+        category_id:  catId,
+        context_keys: contextKeys,
+        history:      [...conversationHistory], // 現在までの会話履歴（QとA）を渡す
+      }),
+      signal: inquirySseController.signal,
+    });
+
+    const reader  = res.body.getReader();
+    const decoder = new TextDecoder();
+    let   buf     = '';
+
+    while(true) {
+      const { done, value } = await reader.read();
+      if(done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for(const line of lines) {
+        if(!line.startsWith('data: ')) continue;
+        try {
+          const obj = JSON.parse(line.slice(6));
+          if(obj.type === 'chunk') {
+            personaAnswers['アーカイバー'] = (personaAnswers['アーカイバー'] || '') + obj.chunk;
+            const thinkEl = document.getElementById('rpgThinking');
+            const textEl  = document.getElementById('rpgAnswerText');
+            if(thinkEl) thinkEl.style.display = 'none';
+            if(textEl) {
+              textEl.textContent = personaAnswers['アーカイバー'];
+              textEl.parentElement.scrollTop = textEl.parentElement.scrollHeight;
+            }
+          } else if(obj.type === 'done') {
+            const answer = obj.answer || personaAnswers['アーカイバー'];
+            personaStates['アーカイバー'] = 'done';
+            rpgShowCurrent();
+            // 履歴に回答を追加
+            conversationHistory.push({ role: 'assistant', content: answer });
+            // ログに回答追加（フィードバックボタン付き）
+            appendLog('A', answer, question);
+            document.getElementById('consultBtn').disabled = false;
+          } else if(obj.type === 'error') {
+            personaStates['アーカイバー'] = 'wait';
+            rpgShowCurrent();
+            showErrorModal(obj.message);
+            document.getElementById('consultBtn').disabled = false;
+          }
+        } catch(e) {}
+      }
+    }
+  } catch(e) {
+    if(e.name !== 'AbortError') {
+      showErrorModal(e.message || '');
+      document.getElementById('consultBtn').disabled = false;
+    }
+  }
+}
+
+// 会話ログに追記
+function appendLog(type, text, question) {
+  const logSection = document.getElementById('conversationLog');
+  const logList    = document.getElementById('logList');
+  if(!logSection || !logList) return;
+
+  logSection.style.display = 'block';
+
+  const isQ   = type === 'Q';
+  const color = isQ ? '#7C6AF7' : '#1D9E75';
+  const label = isQ ? '🔍 照会' : '🗂 アーカイバー';
+
+  const entry = document.createElement('div');
+  entry.style.cssText = 'margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--border);';
+
+  const feedbackHtml = !isQ ? `
+    <div style="display:flex;gap:8px;margin-top:10px;">
+      <button onclick="sendFeedback(this,'good','${encodeURIComponent(question||'')}','${encodeURIComponent(text)}')"
+        style="padding:3px 12px;border-radius:6px;border:1px solid var(--border);background:transparent;
+               color:var(--muted);cursor:pointer;font-size:12px;font-family:inherit;transition:all .15s;"
+        onmouseover="this.style.borderColor='#1D9E75';this.style.color='#1D9E75';"
+        onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)';">
+        👍 正しい
+      </button>
+      <button onclick="sendFeedback(this,'bad','${encodeURIComponent(question||'')}','${encodeURIComponent(text)}')"
+        style="padding:3px 12px;border-radius:6px;border:1px solid var(--border);background:transparent;
+               color:var(--muted);cursor:pointer;font-size:12px;font-family:inherit;transition:all .15s;"
+        onmouseover="this.style.borderColor='#E24B4A';this.style.color='#E24B4A';"
+        onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)';">
+        👎 違う
+      </button>
+    </div>` : '';
+
+  entry.innerHTML = `
+    <div style="font-size:10px;font-weight:600;color:${color};margin-bottom:6px;">${label}</div>
+    <div style="font-size:13px;color:var(--text);line-height:1.8;white-space:pre-wrap;">${text}</div>
+    ${feedbackHtml}`;
+
+  logList.appendChild(entry);
+  logSection.scrollTop = logSection.scrollHeight;
+}
+
+// フィードバック送信
+async function sendFeedback(btn, feedback, encodedQ, encodedA) {
+  const question = decodeURIComponent(encodedQ);
+  const answer   = decodeURIComponent(encodedA);
+  try {
+    await fetch('/api/inquiry/feedback', {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify({ question, answer, feedback }),
+    });
+    // ボタンを押したら選択状態にする
+    const container = btn.parentElement;
+    container.querySelectorAll('button').forEach(b => {
+      b.style.opacity = '0.4';
+      b.disabled = true;
+    });
+    btn.style.opacity   = '1';
+    btn.style.fontWeight = '700';
+    btn.style.borderColor = feedback === 'good' ? '#1D9E75' : '#E24B4A';
+    btn.style.color       = feedback === 'good' ? '#1D9E75' : '#E24B4A';
+    showToast(feedback === 'good' ? '👍 フィードバックを送信しました' : '👎 フィードバックを送信しました');
+  } catch(e) {
+    showToast('フィードバックの送信に失敗しました', true);
+  }
+}
 </script>
 </body>
 </html>
