@@ -1818,6 +1818,7 @@ async function startInquiry() {
   // 入力欄クリア・ボタン無効化
   questionEl.value = '';
   document.getElementById('consultBtn').disabled = true;
+  setInquiryUiDisabled(true);
 
   // 会話ログに質問を追加
   appendLog('Q', question);
@@ -1879,11 +1880,13 @@ async function startInquiry() {
             // ログに回答追加（フィードバックボタン付き）
             appendLog('A', answer, question);
             document.getElementById('consultBtn').disabled = false;
+            setInquiryUiDisabled(false);
           } else if(obj.type === 'error') {
             personaStates['アーカイバー'] = 'wait';
             rpgShowCurrent();
             showErrorModal(obj.message);
             document.getElementById('consultBtn').disabled = false;
+            setInquiryUiDisabled(false);
           }
         } catch(e) {}
       }
@@ -1892,8 +1895,21 @@ async function startInquiry() {
     if(e.name !== 'AbortError') {
       showErrorModal(e.message || '');
       document.getElementById('consultBtn').disabled = false;
+      setInquiryUiDisabled(false);
     }
   }
+}
+
+// ── 照会中の非アクティブ化・アクティブ化 ────────
+function setInquiryUiDisabled(disabled) {
+  ['consultBtn', 'councilQuestion'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = disabled;
+  });
+  // カテゴリドロップダウンボタン
+  document.querySelectorAll('.multi-cat-btn').forEach(btn => btn.disabled = disabled);
+  // コンテキストチェックボックス
+  document.querySelectorAll('#ctxContent input[type="checkbox"]').forEach(cb => cb.disabled = disabled);
 }
 
 // 会話ログに追記

@@ -99,7 +99,7 @@
     .c-textarea {
       width: 100%; background: var(--bg); border: 1px solid var(--border);
       border-radius: 8px; padding: 10px 12px; font-size: 13px; color: var(--text);
-      resize: none; height: 84px; outline: none; font-family: inherit; line-height: 1.6;
+      resize: none; height: 145px; outline: none; font-family: inherit; line-height: 1.6;
     }
     .c-textarea:focus { border-color: #7C6AF7; }
     .c-btn {
@@ -145,6 +145,9 @@
       background: var(--bg);
       padding: 6px 28px 6px;
       border-bottom: 1px solid var(--border);
+      /* 14名フル表示時の高さで固定（グループ切替でも高さが変わらない） */
+      min-height: var(--persona-stage-height, auto);
+      overflow: hidden;
     }
 
     /* ペルソナカード：横向き */
@@ -154,6 +157,9 @@
       display: flex; flex-direction: row; align-items: center; gap: 10px;
       transition: border-color .4s, opacity .3s;
       min-width: 0;
+      height: 68px;      /* グリッドで引き伸ばされないよう固定 */
+      align-self: start; /* グリッド行の高さに合わせて伸びないよう */
+      box-sizing: border-box;
     }
     .persona-card.absent   { opacity: .38; filter: grayscale(.8); }
     .persona-card.thinking { border-color: #FAC775; box-shadow: 0 0 0 3px #FAC77540; }
@@ -418,6 +424,13 @@
               <div class="multi-cat-dropdown" id="multiCatDropdown"></div>
             </div>
           </div>
+          <div style="margin-top:8px;">
+            <label class="c-label">グループ</label>
+            <select id="groupSelect" class="multi-cat-btn" style="width:100%;cursor:pointer;font-size:13px;padding:6px 10px;"
+              onchange="onGroupSelectChange()">
+              <option value="">読み込み中...</option>
+            </select>
+          </div>
           <button class="c-btn" id="consultBtn" onclick="startConsult()">相談する →</button>
         </div>
       </div>
@@ -443,9 +456,14 @@
           <!-- 採用タグ -->
           <div class="adopted-list" id="adoptedList" style="display:none;"></div>
           <textarea class="decision-textarea" id="decisionText"
-            placeholder="採用した意終判断を記入…"></textarea>
+            placeholder="採用した意終判断を記入…" disabled
+            style="opacity:0.4;cursor:not-allowed;"></textarea>
+          <div style="font-size:11px;color:var(--muted);margin-top:6px;line-height:1.6;">
+            ⚠️ 採用回答・最終判断メモは「💾 保存する」を押すまで履歴に残りません
+          </div>
           <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">
-            <button class="save-decision-btn" onclick="saveSession()">💾 保存する</button>
+            <button class="save-decision-btn" id="saveSessionBtn" onclick="saveSession()" disabled
+              style="opacity:0.4;cursor:not-allowed;">💾 保存する</button>
           </div>
         </div>
         <div class="history-section">
@@ -923,6 +941,7 @@ const shownAnswers = {};
 let sseAbortController = null; // SSE中断用
 let councilHistory = []; // 連続相談用会話履歴
 let _pendingLogQuestion = ''; // 現在の相談質問（ログ用）
+let _savedQuestion     = ''; // 保存用に保持（endConsult後も使用）
 
 // 経過時間管理
 const personaStartTimes = {};  // name -> Date（思考開始時刻）
@@ -965,6 +984,16 @@ function renderPersonaStage() {
   const stage = document.getElementById('personaStage');
   stage.innerHTML = '';
 
+  // グループ選択中に表示すべきペルソナがいない場合は空表示
+  const visiblePersonas = PERSONA_DEFS.filter(p =>
+    p.name !== 'アーカイバー' && personaPresent[p.name] !== false
+  );
+  if (visiblePersonas.length === 0) {
+    stage.innerHTML = '<div style="padding:12px;color:var(--muted);font-size:13px;">このグループにペルソナがいません</div>';
+    adjustMainPadding();
+    return;
+  }
+
   PERSONA_DEFS.forEach((p, i) => {
     // アーカイバーは照会室専用 → 相談室に表示しない
     if(p.name === 'アーカイバー') return;
@@ -972,6 +1001,9 @@ function renderPersonaStage() {
     const present = personaPresent[p.name] !== false;
     const state   = personaStates[p.name] || 'wait';
     const st      = present ? state : 'absent';
+
+    // グループ非所属ペルソナは非表示（display:none・高さ固定で対応）
+    const groupHidden = !present;
 
     const statusTxt    = !present ? '退出中' : st==='wait'?'待機中':st==='think'?'考え中…':'回答完了';
     const presenceClass = present ? 'in' : 'out';
@@ -984,6 +1016,7 @@ function renderPersonaStage() {
     const div = document.createElement('div');
     div.id = `pcard-${p.key}`;
     div.className = `persona-card ${st}`;
+    if(groupHidden) { div.style.display = 'none'; return; } // 非所属は描画しない
     if(clickable) {
       div.style.cursor = 'pointer';
       div.title = 'クリックで回答を表示';
@@ -1011,6 +1044,17 @@ function renderPersonaStage() {
   });
   // ペルソナ数変化後にレイアウトを再計算
   adjustMainPadding();
+  // 初回のみ高さを記録して固定（以後は上書きしない）
+  if (!_isGroupFiltering()) {
+    const stage = document.getElementById('personaStage');
+    if (stage) {
+      const alreadyFixed = document.documentElement.style.getPropertyValue('--persona-stage-height');
+      if (!alreadyFixed) {
+        const h = stage.scrollHeight;
+        if (h > 0) document.documentElement.style.setProperty('--persona-stage-height', h + 'px');
+      }
+    }
+  }
 }
 
 function togglePresence(name) {
@@ -1177,27 +1221,18 @@ function closeRpgPanel() {
   updateContextPanelHeight();
 }
 
-// 相談終了：処理中でも中断して下段を表示し、履歴に保存
+// 相談終了：処理中でも中断して下段を表示
 async function endConsult() {
-  // 相談終了時に会話履歴をリセット
-  councilHistory = [];
-  _pendingLogQuestion = '';
-  // 会話ログを非表示
-  const logEl = document.getElementById('councilLog');
-  if(logEl) logEl.style.display = 'none';
-  const logList = document.getElementById('councilLogList');
-  if(logList) logList.innerHTML = '';
-  document.getElementById('councilQuestion').value = '';
-  clearConsultSession(); // 手動終了 → セッション削除
+  // カテゴリ・グループのロックを解除
+  unlockCatGroup();
   // SSE接続を中断（処理中の場合）
   if(sseAbortController) {
     sseAbortController.abort();
     sseAbortController = null;
-    // サーバー側のOllama処理も中断
     navigator.sendBeacon('/api/ollama/abort', JSON.stringify({}));
-    // 相談するボタンを戻す
     const btn = document.getElementById('consultBtn');
     if(btn) btn.disabled = false;
+    setConsultUiDisabled(false);
   }
 
   if(elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
@@ -1205,12 +1240,15 @@ async function endConsult() {
   document.getElementById('bottomArea').style.display = '';
   updateContextPanelHeight();
   updateAdoptedAnswersList();
+  // 相談終了後に最終判断メモと保存ボタンを活性化
+  const decisionEl = document.getElementById('decisionText');
+  const saveBtnEl  = document.getElementById('saveSessionBtn');
+  if (decisionEl) { decisionEl.disabled = false; decisionEl.style.opacity = ''; decisionEl.style.cursor = ''; }
+  if (saveBtnEl)  { saveBtnEl.disabled  = false; saveBtnEl.style.opacity  = ''; saveBtnEl.style.cursor  = ''; }
 
-  // 全ペルソナ回答済みかチェック
-  const allDone = rpgActiveList.length > 0 && rpgActiveList.every(n => personaStates[n] === 'done');
-
-  // 相談内容がありまだ保存されていない場合のみ自動保存
-  const question = document.getElementById('councilQuestion').value.trim();
+  // 相談内容がありまだ保存されていない場合のみ中断保存
+  const question = _pendingLogQuestion || document.getElementById('councilQuestion').value.trim();
+  const allDone  = rpgActiveList.length > 0 && rpgActiveList.every(n => personaStates[n] === 'done');
   if(question && !currentSessionId) {
     try {
       const catId = getSelectedCategoryIds()[0];
@@ -1230,6 +1268,18 @@ async function endConsult() {
       }
     } catch(e) {}
   }
+
+  // 保存処理の後にリセット（_savedQuestionは保存ボタン用に残す）
+  councilHistory = [];
+  _pendingLogQuestion = '';
+  document.getElementById('councilQuestion').value = '';
+  clearConsultSession();
+
+  // 会話ログを非表示
+  const logEl = document.getElementById('councilLog');
+  if(logEl) logEl.style.display = 'none';
+  const logList = document.getElementById('councilLogList');
+  if(logList) logList.innerHTML = '';
 
   setTimeout(() => {
     document.getElementById('bottomArea').scrollIntoView({ behavior:'smooth', block:'start' });
@@ -1433,11 +1483,18 @@ function startConsult() {
   Object.keys(personaElapsed).forEach(k => delete personaElapsed[k]);
   if(elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
   adoptedPersonas = [];
+  _savedQuestion = ''; // 次の相談開始時にリセット
+  // 最終判断メモと保存ボタンを再ロック
+  const decisionEl2 = document.getElementById('decisionText');
+  const saveBtnEl2  = document.getElementById('saveSessionBtn');
+  if (decisionEl2) { decisionEl2.disabled = true; decisionEl2.style.opacity = '0.4'; decisionEl2.style.cursor = 'not-allowed'; }
+  if (saveBtnEl2)  { saveBtnEl2.disabled  = true; saveBtnEl2.style.opacity  = '0.4'; saveBtnEl2.style.cursor  = 'not-allowed'; }
   // 連続相談：currentSessionIdとdecisionTextは維持（相談終了まで）
   updateAdoptedList();
   rpgIndex = 0;
   // 今回の質問を会話ログに追加
   _pendingLogQuestion = question;
+  _savedQuestion      = question; // 保存用に保持（endConsult後も参照できるよう）
 
   // 入室中のペルソナは全員いっせいに「考え中」にする
   rpgActiveList.forEach(name => { personaStates[name] = 'think'; });
@@ -1451,6 +1508,7 @@ function startConsult() {
 
   const btn = document.getElementById('consultBtn');
   btn.disabled = true;
+  setConsultUiDisabled(true, true); // カテゴリ・グループも相談終了まで固定
 
   const enabledKeys = getEnabledContextKeys();
 
@@ -1489,6 +1547,7 @@ function startConsult() {
   }).catch(err => {
     if(err.name !== 'AbortError') {
       btn.disabled = false;
+      setConsultUiDisabled(false);
       showToast('通信エラーが発生しました', true);
     }
   });
@@ -1527,6 +1586,7 @@ function handleSSE(obj) {
     case 'finished':
       if(elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
       document.getElementById('consultBtn').disabled = false;
+      setConsultUiDisabled(false); // カテゴリ・グループは_catGroupLockedで維持
       showToast('全員の回答が完了しました');
       // 会話ログに今回のQ&Aを追記
       appendCouncilLog(_pendingLogQuestion, rpgActiveList.map(name => ({ name, answer: personaAnswers[name]||'' })));
@@ -1535,12 +1595,13 @@ function handleSSE(obj) {
       rpgActiveList.forEach(name => {
         if(personaAnswers[name]) councilHistory.push({ role: 'assistant', content: `[${name}] ${personaAnswers[name]}` });
       });
-      // 入力欄をクリア
+      // 入力欄をクリア（_pendingLogQuestionは保持）
       document.getElementById('councilQuestion').value = '';
-      clearConsultSession(); // 正常完了 → セッション削除
+      clearConsultSession(); // 正常完了 → sessionStorageをクリア
       break;
     case 'error':
       document.getElementById('consultBtn').disabled = false;
+      setConsultUiDisabled(false); // カテゴリ・グループは_catGroupLockedで維持
       // SSE中断
       if(sseAbortController) { sseAbortController.abort(); sseAbortController = null; }
       if(elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
@@ -1551,6 +1612,82 @@ function handleSSE(obj) {
       showErrorModal(obj.message);
       break;
   }
+}
+
+
+// ── グループ読み込み・選択 ─────────────────────
+let _allGroups = [];
+
+async function loadGroups() {
+  try {
+    const res  = await fetch('/api/persona_groups');
+    _allGroups = await res.json();
+    const sel  = document.getElementById('groupSelect');
+    if (!sel) return;
+    sel.innerHTML = _allGroups.map(g =>
+      `<option value="${g.id}">${g.name}</option>`
+    ).join('');
+    sel.value = '1';
+    onGroupSelectChange(true);  // 初期化時もグループなしのメンバーで表示を確定する
+  } catch (e) {
+    console.error('グループ取得エラー', e);
+  }
+}
+
+// グループフィルタ中かどうか（グループなし以外が選択中）
+function _isGroupFiltering() {
+  const sel = document.getElementById('groupSelect');
+  if (!sel) return false;
+  return parseInt(sel.value) !== 1;
+}
+
+function onGroupSelectChange(applyEntry = true) {
+  const sel = document.getElementById('groupSelect');
+  if (!sel) return;
+  const groupId = parseInt(sel.value);
+  const group   = _allGroups.find(g => g.id === groupId);
+  if (!group) return;
+
+  if (applyEntry) {
+    // グループなし・通常グループ問わず、そのグループのメンバーのみ表示
+    Object.keys(personaPresent).forEach(name => {
+      if (name === 'アーカイバー') return;
+      personaPresent[name] = group.members.includes(name);
+    });
+    rpgActiveList = Object.keys(personaPresent)
+      .filter(name => name !== 'アーカイバー' && personaPresent[name]);
+  }
+  renderPersonaStage();
+}
+
+// ── 相談中の非アクティブ化・アクティブ化 ────────
+// lockCatGroup=true: カテゴリ・グループも含めて全要素を非活性
+// lockCatGroup=false: カテゴリ・グループ以外を活性化（連続相談中は維持）
+let _catGroupLocked = false; // カテゴリ・グループのロック状態
+
+function setConsultUiDisabled(disabled, lockCatGroup = false) {
+  if (lockCatGroup) _catGroupLocked = disabled;
+
+  // 相談ボタン・質問欄・入退室ボタン・コンテキスト
+  ['consultBtn', 'councilQuestion'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = disabled;
+  });
+  document.querySelectorAll('.persona-toggle-btn').forEach(btn => btn.disabled = disabled);
+  document.querySelectorAll('#ctxContent input[type="checkbox"]').forEach(cb => cb.disabled = disabled);
+
+  // カテゴリ・グループは lockCatGroup または _catGroupLocked が true の間は常に非活性
+  const lockCG = lockCatGroup ? disabled : _catGroupLocked;
+  const groupEl = document.getElementById('groupSelect');
+  if (groupEl) groupEl.disabled = lockCG || disabled;
+  document.querySelectorAll('.multi-cat-btn').forEach(btn => btn.disabled = lockCG || disabled);
+}
+
+function unlockCatGroup() {
+  _catGroupLocked = false;
+  const groupEl = document.getElementById('groupSelect');
+  if (groupEl) groupEl.disabled = false;
+  document.querySelectorAll('.multi-cat-btn').forEach(btn => btn.disabled = false);
 }
 
 // ── エラーモーダル ──
@@ -1684,7 +1821,8 @@ function clearConsultSession() {
 //  保存・履歴・カテゴリ・設定
 // ══════════════════════════════════════════════════
 async function saveSession() {
-  const question = document.getElementById('councilQuestion').value.trim();
+  // 質問は入力欄 or 直近の相談内容(_pendingLogQuestion)から取得
+  const question = document.getElementById('councilQuestion').value.trim() || _pendingLogQuestion || _savedQuestion || '';
   const catId    = getSelectedCategoryIds()[0];
   const decision = document.getElementById('decisionText').value.trim();
   if(!question) { showToast('相談内容がありません', true); return; }
@@ -1707,6 +1845,14 @@ async function saveSession() {
       currentSessionId = data.session_id || currentSessionId;
       showToast('保存しました ✓');
       loadHistory();
+      // 保存後に最終判断メモ・採用回答をクリア
+      const decisionEl = document.getElementById('decisionText');
+      if(decisionEl) decisionEl.value = '';
+      adoptedPersonas = [];
+      updateAdoptedList();
+      updateAdoptedAnswersList();
+      _savedQuestion = '';
+      currentSessionId = null;
     } else {
       showToast('保存に失敗しました', true);
     }
@@ -1937,6 +2083,7 @@ async function loadPersonaSettings() {
 window.addEventListener('load', async () => {
   await loadCategories();
   await loadPersonaSettings();
+  await loadGroups();
   await loadHistory();
   await loadContextData();
   await checkUserProfile();

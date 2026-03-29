@@ -3,14 +3,229 @@
    設定画面の制御（settings.html 専用）
    ══════════════════════════════════════════════════ */
 
-let currentMode = 'personal';
+let currentMode = 'ollama';
 let apiKeyVisible = false;
+let _providers = [];  // サーバーから取得したプロバイダー一覧
 
 // ── 初期化 ────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
+  await loadProviders();
   await loadSettings();
   await loadCategories();
 });
+
+// ── LLMプロバイダー一覧をサーバーから取得して動的描画 ──
+async function loadProviders() {
+  try {
+    const res = await fetch('/api/llm/providers');
+    if (!res.ok) return;
+    _providers = await res.json();
+    renderModeCards();
+  } catch (e) {
+    console.error('プロバイダー取得エラー', e);
+  }
+}
+
+// renderModeCards は不要（ドロップダウン形式のため削除）
+function renderModeCards() { /* 廃止・ドロップダウン形式に移行 */ }
+
+// ── プロバイダー表示メタ情報 ─────────────────────
+const _PROVIDER_META = {
+  ollama: { icon: '🏠', sub: '完全ローカル・無料'          },
+  groq:   { icon: '⚡', sub: '高速クラウド・無料枠あり'     },
+  openai: { icon: '🤖', sub: 'GPT-4o・従量課金'            },
+  gemini: { icon: '✨', sub: 'Google Gemini・従量課金'      },
+  claude: { icon: '🔷', sub: 'Anthropic Claude・従量課金'   },
+};
+
+
+// ── プロバイダーのスペック定義 ────────────────────
+const _PROVIDER_SPECS = {
+  ollama: [
+    ['処理', '🏠 完全ローカル'],
+    ['速度', '⚙️ GPU・メモリ性能に依存'],
+    ['機密', '🔒 完全秘匿'],
+    ['費用', '無料'],
+  ],
+  groq: [
+    ['処理', '☁️ クラウド'],
+    ['速度', '⚡ 高速・高精度'],
+    ['機密', '📋 利用規約に準拠'],
+    ['費用', '無料枠あり'],
+  ],
+  openai: [
+    ['処理', '☁️ クラウド'],
+    ['速度', '⚡ 高速・高精度'],
+    ['機密', '📋 利用規約に準拠'],
+    ['費用', '従量課金'],
+  ],
+  gemini: [
+    ['処理', '☁️ クラウド'],
+    ['速度', '⚡ 高速・高精度'],
+    ['機密', '📋 利用規約に準拠'],
+    ['費用', '従量課金'],
+  ],
+  claude: [
+    ['処理', '☁️ クラウド'],
+    ['速度', '⚡ 高速・高精度'],
+    ['機密', '📋 利用規約に準拠'],
+    ['費用', '従量課金'],
+  ],
+};
+
+// ── クラウド／ローカル 切替 ───────────────────────
+function selectLlmType(type, skipFlash = false) {
+  document.getElementById('typeBtn-cloud').classList.toggle('active', type === 'cloud');
+  document.getElementById('typeBtn-local').classList.toggle('active', type === 'local');
+
+  const dropdownArea = document.getElementById('llmDropdownArea');
+  if (!dropdownArea) return;
+  dropdownArea.style.display = 'block';
+
+  const filtered = type === 'local'
+    ? _providers.filter(p => p.id === 'ollama')
+    : _providers.filter(p => p.id !== 'ollama');
+
+  _buildCustomOptions(filtered);
+  // 先頭を選択
+  if (filtered.length > 0) selectCustomOption(filtered[0].id, skipFlash);
+}
+
+// ── カスタムドロップダウン操作 ───────────────────
+function _buildCustomOptions(providers) {
+  const container = document.getElementById('cstOptions');
+  if (!container) return;
+  container.innerHTML = providers.map(p => {
+    const meta = _PROVIDER_META[p.id] || { icon: '🤖', sub: '' };
+    return `
+      <div class="custom-select-option" id="cso-${p.id}" onclick="selectCustomOption('${p.id}')">
+        <span class="cso-icon">${meta.icon}</span>
+        <span class="cso-body">
+          <div class="cso-name">${escHtml(p.name)}</div>
+          <div class="cso-sub">${meta.sub}</div>
+        </span>
+        <span class="cso-check" id="cso-check-${p.id}" style="display:none;">✓</span>
+      </div>`;
+  }).join('');
+}
+
+function toggleCustomSelect() {
+  const trigger = document.getElementById('cstTrigger');
+  const options = document.getElementById('cstOptions');
+  if (!trigger || !options) return;
+  const isOpen = options.classList.contains('open');
+  trigger.classList.toggle('open', !isOpen);
+  options.classList.toggle('open', !isOpen);
+}
+
+function selectCustomOption(id, skipFlash = false) {
+  // オプション一覧を閉じる
+  document.getElementById('cstTrigger')?.classList.remove('open');
+  document.getElementById('cstOptions')?.classList.remove('open');
+
+  // チェックマーク更新
+  document.querySelectorAll('.cso-check').forEach(el => el.style.display = 'none');
+  document.querySelectorAll('.custom-select-option').forEach(el => el.classList.remove('selected'));
+  const checkEl = document.getElementById('cso-check-' + id);
+  if (checkEl) checkEl.style.display = 'block';
+  const optEl = document.getElementById('cso-' + id);
+  if (optEl) optEl.classList.add('selected');
+
+  // トリガー表示を更新
+  const meta = _PROVIDER_META[id] || { icon: '🤖', sub: '' };
+  const p    = _providers.find(x => x.id === id);
+  document.getElementById('cstIcon').textContent = meta.icon;
+  document.getElementById('cstName').textContent = p ? p.name : id;
+
+  currentMode = id;
+  _updateSpecArea(id);
+  _updateApiKeyArea(id);
+  _updateOllamaSection(id);
+}
+
+// ドロップダウン外クリックで閉じる
+document.addEventListener('click', e => {
+  const sel = document.getElementById('customProviderSelect');
+  if (sel && !sel.contains(e.target)) {
+    document.getElementById('cstTrigger')?.classList.remove('open');
+    document.getElementById('cstOptions')?.classList.remove('open');
+  }
+});
+
+// ── onProviderSelectChange: 旧select用（後方互換・実質未使用） ──
+function onProviderSelectChange(skipFlash = false) {}
+
+// スペック説明を更新
+function _updateSpecArea(mode) {
+  const area    = document.getElementById('llmSpecArea');
+  const content = document.getElementById('llmSpecContent');
+  if (!area || !content) return;
+
+  const specs = _PROVIDER_SPECS[mode];
+  if (!specs) { area.style.display = 'none'; return; }
+
+  const rows = specs.map(([label, value]) =>
+    `<div class="mode-spec-row"><span class="mode-spec-label">${label}</span><span class="mode-spec-value">${value}</span></div>`
+  ).join('');
+  content.innerHTML = `<div class="llm-spec-box">${rows}</div>`;
+  area.style.display = 'block';
+}
+
+// APIキー入力エリアを更新（Groq共通 → 固有APIキーの順）
+function _updateApiKeyArea(mode) {
+  const inlineArea = document.getElementById('apiKeyInlineArea');
+  if (!inlineArea) return;
+
+  if (mode === 'ollama') {
+    inlineArea.style.display = 'none';
+    return;
+  }
+
+  inlineArea.style.display = 'block';
+
+  // Groq共通キー欄は常に先頭（クラウドモード時は常に表示）
+  const groqInline = document.getElementById('apiInlineGroq');
+  if (groqInline) {
+    inlineArea.insertBefore(groqInline, inlineArea.firstChild);
+  }
+
+  // Groqキーの説明文をモードに応じて切り替え
+  const groqDesc = document.getElementById('groqKeyDesc');
+  if (groqDesc) {
+    if (mode === 'groq') {
+      groqDesc.textContent = '文字起こし・クリーニング・要約・相談・照会・保管庫整形すべてに使用します';
+    } else {
+      groqDesc.textContent = '文字起こしに使用します（クラウドモード共通）';
+    }
+  }
+
+  // 固有キー欄：選択したAPIのみ表示（Groq選択時は非表示）
+  ['openai', 'gemini', 'claude'].forEach(id => {
+    const el = document.getElementById('apiInlineSection-' + id);
+    if (!el) return;
+    el.style.display = (mode === id) ? 'block' : 'none';
+    // 固有キー欄はGroqの次に配置
+    if (mode === id) inlineArea.appendChild(el);
+  });
+}
+
+// Ollamaセクション（モデル選択・注意書き）の表示切替
+function _updateOllamaSection(mode) {
+  // 外部のollamaSectionは削除済み（枠内のollamaModelInlineで制御）
+  const modelInline = document.getElementById('ollamaModelInline');
+  if (modelInline) modelInline.style.display = mode === 'ollama' ? 'block' : 'none';
+
+  const notice = document.getElementById('businessNotice');
+  if (notice) {
+    if (mode === 'ollama') {
+      notice.classList.add('visible');
+      notice.innerHTML = '⚠️ <strong>Ollama（ローカル）の動作要件</strong><br>GPU（VRAM 8GB以上）を推奨します。GPUがない場合もCPUで動作しますが、処理に数分かかる場合があります。初回起動時にモデルファイル（約3GB〜）を自動ダウンロードします。';
+    } else {
+      notice.classList.remove('visible');
+      notice.innerHTML = '';
+    }
+  }
+}
 
 
 // ══════════════════════════════════════════════════
@@ -155,15 +370,22 @@ async function loadSettings() {
     const data = await res.json();
 
     // AIモードを反映
-    selectMode(data.ai_mode || 'personal', false);
+    selectMode(data.ai_mode || 'ollama', false);
 
-    // APIキーを反映
-    if (data.groq_api_key) {
-      document.getElementById('apiKeyInput').value = data.groq_api_key;
-    }
+    // APIキーを反映（各フィールドに設定）
+    const keyMap = {
+      'groq_api_key':      'apiKeyGroq',
+      'openai_api_key':    'apiKeyOpenai',
+      'gemini_api_key':    'apiKeyGemini',
+      'anthropic_api_key': 'apiKeyClaude',
+    };
+    Object.entries(keyMap).forEach(([dataKey, elId]) => {
+      const el = document.getElementById(elId);
+      if (el && data[dataKey]) el.value = data[dataKey];
+    });
 
     // Ollamaモデル一覧を取得して反映
-    await loadOllamaModels(data.ollama_model || 'llama3.1:8b');
+    await loadOllamaModels(data.ollama_model || 'gemma3:27b');
 
     // 録音ソースを反映
     const recSource = data.recording_source || 'mic';
@@ -176,55 +398,67 @@ async function loadSettings() {
   }
 }
 
-// ── モード選択 ────────────────────────────────────
+// ── selectMode: ドロップダウン形式への橋渡し ────────
+// loadSettings から呼ばれる（初期値復元用）
 function selectMode(mode, showNotice = true) {
   currentMode = mode;
+  const type = (mode === 'ollama') ? 'local' : 'cloud';
 
-  document.getElementById('card-personal').className = 'mode-card';
-  document.getElementById('card-business').className = 'mode-card';
+  // スイッチボタンの見た目だけ更新（selectLlmTypeは呼ばない＝先頭自動選択を防ぐ）
+  document.getElementById('typeBtn-cloud')?.classList.toggle('active', type === 'cloud');
+  document.getElementById('typeBtn-local')?.classList.toggle('active', type === 'local');
 
-  if (mode === 'personal') {
-    document.getElementById('card-personal').classList.add('active-personal');
-    document.getElementById('businessNotice').classList.remove('visible');
-    document.getElementById('groqSection').style.display = 'block';
-    document.getElementById('ollamaSection').style.display = 'none';
-  } else {
-    document.getElementById('card-business').classList.add('active-business');
-    if (showNotice) {
-      document.getElementById('businessNotice').classList.add('visible');
-    }
-    document.getElementById('groqSection').style.display = 'none';
-    document.getElementById('ollamaSection').style.display = 'block';
-  }
+  // ドロップダウンを正しいプロバイダーで構築してから値をセット
+  const dropdownArea = document.getElementById('llmDropdownArea');
+  if (dropdownArea) dropdownArea.style.display = 'block';
+
+  const filtered = type === 'local'
+    ? _providers.filter(p => p.id === 'ollama')
+    : _providers.filter(p => p.id !== 'ollama');
+  _buildCustomOptions(filtered);
+
+  // 指定のmodeを選択状態にする
+  selectCustomOption(mode, true); // skipFlash=true
 }
 
-// ── APIキー表示切替 ───────────────────────────────
-function toggleApiKeyVisibility() {
-  apiKeyVisible = !apiKeyVisible;
-  const input = document.getElementById('apiKeyInput');
-  const btn   = document.querySelector('.api-key-toggle');
-  input.type  = apiKeyVisible ? 'text' : 'password';
-  btn.textContent = apiKeyVisible ? '隠す' : '表示';
+// _flashApiKeySection: 点滅不要につき空実装
+function _flashApiKeySection(el) {}
+
+// ── APIキー表示切替（汎用） ──────────────────────
+function toggleApiKeyVisibility(inputId, btn) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  const isPass = input.type === 'password';
+  input.type   = isPass ? 'text' : 'password';
+  if (btn) btn.textContent = isPass ? '隠す' : '表示';
 }
 
 // ── 設定保存 ──────────────────────────────────────
 async function saveSettings() {
-  const apiKey = document.getElementById('apiKeyInput').value.trim();
-
-  if (currentMode === 'personal' && !apiKey) {
-    showToast('❌ Groq APIキーを入力してください');
-    return;
+  // クラウドモード時はGroqキー必須（文字起こし共通）
+  if (currentMode !== 'ollama') {
+    const groqEl  = document.getElementById('apiKeyGroq');
+    const groqKey = groqEl ? groqEl.value.trim() : '';
+    if (!groqKey) {
+      showToast('❌ Groq APIキーを入力してください（文字起こしに必要です）');
+      return;
+    }
   }
 
-  const res = await fetch('/api/settings', {
+  const payload = {
+    ai_mode:             currentMode,
+    groq_api_key:        (document.getElementById('apiKeyGroq')    || {}).value || '',
+    openai_api_key:      (document.getElementById('apiKeyOpenai')  || {}).value || '',
+    gemini_api_key:      (document.getElementById('apiKeyGemini')  || {}).value || '',
+    anthropic_api_key:   (document.getElementById('apiKeyClaude')  || {}).value || '',
+    recording_source:    currentRecSource,
+    ollama_model:        (document.getElementById('ollamaModelSelect') || {}).value || 'gemma3:27b',
+  };
+
+  const res  = await fetch('/api/settings', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      ai_mode:          currentMode,
-      groq_api_key:     apiKey,
-      recording_source: currentRecSource,
-      ollama_model:     (document.getElementById('ollamaModelSelect') || {}).value || 'llama3.1:8b',
-    }),
+    body: JSON.stringify(payload),
   });
 
   const data = await res.json();
@@ -237,8 +471,8 @@ async function saveSettings() {
       btn.classList.remove('saved');
     }, 2000);
     showToast('✅ 設定を保存しました');
-    // ビジネス用モードの場合はモデルダウンロード進捗を表示
-    if (currentMode === 'business') {
+    // Ollamaモードの場合はモデルダウンロード進捗を表示
+    if (currentMode === 'ollama') {
       startModelStatusPolling();
     } else {
       hideModelStatus();
@@ -316,7 +550,7 @@ function showModelStatus(msg, type = '') {
     el.id = 'modelStatusBar';
     el.className = 'model-status-bar';
     const notice = document.getElementById('businessNotice');
-    if (notice) notice.appendChild(el);
+    const nb = document.getElementById('businessNotice'); if (nb) nb.after(el);
   }
   el.textContent  = msg;
   el.className    = 'model-status-bar' + (type ? ' model-status-' + type : '');
@@ -658,6 +892,15 @@ function openPersonaModal(nameOrNull) {
   // アイコンをリセット
   _resetModalIcon();
 
+  // グループ選択肢を構築
+  const pGroupSel = document.getElementById('pGroup');
+  if (pGroupSel) {
+    pGroupSel.innerHTML = _groups
+      .filter(g => g.id !== 0)
+      .map(g => `<option value="${g.id}">${escHtml(g.name)}</option>`)
+      .join('');
+  }
+
   if(nameOrNull) {
     const p = _personas.find(x => x.persona_name === nameOrNull);
     document.getElementById('personaModalTitle').textContent = 'ペルソナを編集';
@@ -665,6 +908,11 @@ function openPersonaModal(nameOrNull) {
     document.getElementById('pRole').value    = p ? (p.role || '')   : '';
     document.getElementById('pPrompt').value  = p ? (p.system_prompt || '') : '';
     document.getElementById('pEnabled').checked = p ? !!p.enabled    : true;
+    // 現在所属しているグループを選択
+    if (pGroupSel && nameOrNull) {
+      const currentGroup = _groups.find(g => g.members.includes(nameOrNull));
+      if (currentGroup) pGroupSel.value = currentGroup.id;
+    }
     // 既存アイコンをプレビュー表示
     fetch(`/api/personas/${encodeURIComponent(nameOrNull)}/icon`)
       .then(r => r.json())
@@ -784,6 +1032,24 @@ async function savePersona() {
       }
     }
 
+    // グループ変更を反映
+    const pGroupSel = document.getElementById('pGroup');
+    if (pGroupSel) {
+      const newGroupId  = parseInt(pGroupSel.value);
+      const targetGroup = _groups.find(g => g.id === newGroupId);
+      if (targetGroup) {
+        // 旧名前・新名前どちらも除いてから新名前で追加（名前変更対応）
+        const oldName    = _editingPersonaName || name;
+        const cleanMembers = targetGroup.members.filter(m => m !== oldName && m !== name);
+        const newMembers   = [...cleanMembers, name];
+        await fetch(`/api/persona_groups/${newGroupId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: targetGroup.name, members: newMembers }),
+        });
+        await loadGroups();
+      }
+    }
     showToast(_editingPersonaName ? '更新しました ✓' : '追加しました ✓');
     closePersonaModal();
     await loadPersonas();
@@ -848,4 +1114,180 @@ document.addEventListener('DOMContentLoaded', () => {
     const el = document.getElementById(id);
     if(el) el.checked = !!sessionStorage.getItem('cove_debug_' + key);
   });
+});
+
+
+// ══════════════════════════════════════════════════
+//  グループ管理
+// ══════════════════════════════════════════════════
+
+let _groups        = [];
+let _editingGroupId = null;
+
+async function loadGroups() {
+  try {
+    const res = await fetch('/api/persona_groups');
+    _groups   = await res.json();
+    renderGroupList();
+  } catch (e) {
+    console.error('グループ取得エラー', e);
+  }
+}
+
+function renderGroupList() {
+  const el = document.getElementById('groupList');
+  if (!el) return;
+  el.innerHTML = _groups.map(g => {
+    const isSystem = g.is_system === 1;
+    return `
+      <div style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;
+                  border-radius:20px;border:1px solid var(--border);background:var(--bg);font-size:12px;">
+        <span style="color:#e0e0e0;">${escHtml(g.name)}</span>
+        <span style="color:var(--muted);font-size:10px;">${g.members.length}名</span>
+        ${!isSystem ? `
+          <button onclick="openGroupModal(${g.id})"
+            style="background:transparent;border:none;color:#7C6AF7;cursor:pointer;font-size:11px;padding:0 2px;">✏️</button>
+          <button onclick="deleteGroup(${g.id})"
+            style="background:transparent;border:none;color:#E24B4A;cursor:pointer;font-size:11px;padding:0 2px;">🗑️</button>
+        ` : `<span style="font-size:10px;color:var(--muted);">（固定）</span>`}
+      </div>`;
+  }).join('');
+}
+
+function openGroupModal(groupIdOrNull) {
+  _editingGroupId = groupIdOrNull;
+  const modal = document.getElementById('groupModal');
+  modal.style.display = 'flex';
+
+  const title = document.getElementById('groupModalTitle');
+  const nameEl = document.getElementById('gName');
+
+  if (groupIdOrNull) {
+    const g = _groups.find(x => x.id === groupIdOrNull);
+    title.textContent = 'グループを編集';
+    nameEl.value = g ? g.name : '';
+    _renderGroupMemberList(g ? g.members : []);
+  } else {
+    title.textContent = 'グループを追加';
+    nameEl.value = '';
+    _renderGroupMemberList([]);
+  }
+}
+
+function _renderGroupMemberList(selectedMembers) {
+  const el = document.getElementById('gMemberList');
+  if (!el) return;
+  // アーカイバーを除外したペルソナ一覧
+  const personas = _personas.filter(p => p.persona_name !== 'アーカイバー');
+  el.innerHTML = personas.map(p => {
+    const checked = selectedMembers.includes(p.persona_name);
+    return `
+      <label style="display:flex;align-items:center;gap:6px;padding:4px 8px;border-radius:6px;
+                    background:${checked ? 'rgba(124,106,247,0.15)' : 'var(--bg)'};
+                    border:1px solid ${checked ? '#7C6AF7' : 'var(--border)'};cursor:pointer;font-size:12px;"
+             id="gmLabel-${escHtml(p.persona_name)}">
+        <input type="checkbox" value="${escHtml(p.persona_name)}"
+          ${checked ? 'checked' : ''}
+          onchange="onGroupMemberChange()"
+          style="accent-color:#7C6AF7;">
+        ${escHtml(p.persona_name)}
+      </label>`;
+  }).join('');
+  _updateGroupMemberCount();
+}
+
+function onGroupMemberChange() {
+  // 14名上限チェック
+  const checked = document.querySelectorAll('#gMemberList input[type="checkbox"]:checked');
+  if (checked.length > 14) {
+    // 最後にチェックしたものを外す
+    event.target.checked = false;
+    showToast('❌ 1グループの上限は14名です');
+    return;
+  }
+  // ラベルの色を更新
+  document.querySelectorAll('#gMemberList input[type="checkbox"]').forEach(cb => {
+    const label = cb.parentElement;
+    if (cb.checked) {
+      label.style.background = 'rgba(124,106,247,0.15)';
+      label.style.borderColor = '#7C6AF7';
+    } else {
+      label.style.background = 'var(--bg)';
+      label.style.borderColor = 'var(--border)';
+    }
+  });
+  _updateGroupMemberCount();
+}
+
+function _updateGroupMemberCount() {
+  const el      = document.getElementById('gMemberCount');
+  const checked = document.querySelectorAll('#gMemberList input[type="checkbox"]:checked').length;
+  if (el) el.textContent = `${checked} / 14名選択中`;
+}
+
+function closeGroupModal() {
+  document.getElementById('groupModal').style.display = 'none';
+  _editingGroupId = null;
+}
+
+async function saveGroup() {
+  const name = document.getElementById('gName').value.trim();
+  if (!name) { showToast('❌ グループ名を入力してください'); return; }
+
+  const members = [...document.querySelectorAll('#gMemberList input[type="checkbox"]:checked')]
+    .map(cb => cb.value);
+
+  try {
+    let res;
+    if (_editingGroupId) {
+      res = await fetch(`/api/persona_groups/${_editingGroupId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, members }),
+      });
+    } else {
+      res = await fetch('/api/persona_groups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const created = await res.json();
+      if (created.status === 'ok' && members.length > 0) {
+        await fetch(`/api/persona_groups/${created.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, members }),
+        });
+      }
+    }
+    showToast(_editingGroupId ? '✅ グループを更新しました' : '✅ グループを追加しました');
+    closeGroupModal();
+    await loadGroups();
+  } catch (e) {
+    showToast('❌ 保存に失敗しました');
+  }
+}
+
+async function deleteGroup(groupId) {
+  const g = _groups.find(x => x.id === groupId);
+  if (!g) return;
+  if (!confirm(`グループ「${g.name}」を削除しますか？\nメンバーは「グループなし」に移動します。`)) return;
+  try {
+    await fetch(`/api/persona_groups/${groupId}`, { method: 'DELETE' });
+    showToast('✅ グループを削除しました');
+    await loadGroups();
+  } catch (e) {
+    showToast('❌ 削除に失敗しました');
+  }
+}
+
+// モーダル外クリックで閉じる
+document.addEventListener('click', (e) => {
+  const modal = document.getElementById('groupModal');
+  if (modal && e.target === modal) closeGroupModal();
+});
+
+// ページ読み込み時にグループも取得
+document.addEventListener('DOMContentLoaded', () => {
+  loadGroups();
 });

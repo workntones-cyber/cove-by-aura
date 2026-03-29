@@ -46,6 +46,13 @@ from app.database import (
     delete_council_session,
     get_context_for_category,
     get_context_for_categories,
+    # グループ
+    get_all_persona_groups,
+    create_persona_group,
+    update_persona_group,
+    delete_persona_group,
+    add_persona_to_default_group,
+    remove_persona_from_all_groups,
 )
 from app.services.recorder import delete_recording as delete_wav
 from app.services.recorder import get_status, list_recordings, start, stop
@@ -174,14 +181,27 @@ def inquiry_ask():
     def generate():
         ollama_res = None
         try:
-            env   = _read_env()
-            model = _get_ollama_model()
+            env     = _read_env()
+            ai_mode = env.get("AI_MODE", "ollama")
+
+            from app.services.llm import get_provider, is_local_mode
+            provider = get_provider(ai_mode)
+            if provider is None:
+                yield f"data: {_json.dumps({'type': 'error', 'message': f'不明なAIモード: {ai_mode}'}, ensure_ascii=False)}\n\n"
+                return
+
+            api_key = ""
+            if not is_local_mode(ai_mode):
+                api_key_name = getattr(provider, "API_KEY_NAME", "")
+                api_key      = env.get(api_key_name, "").strip() if api_key_name else ""
+                if not api_key:
+                    yield f"data: {_json.dumps({'type': 'error', 'message': f'{provider.DISPLAY_NAME} のAPIキーが設定されていません'}, ensure_ascii=False)}\n\n"
+                    return
 
             system_content = archiver_prompt
             if context_text:
                 system_content += f"\n\n【参照データ】\n{context_text}"
 
-            # 会話履歴をmessages配列に組み立て
             messages = [{"role": "system", "content": system_content}]
             for h in history:
                 role    = h.get("role", "user")
@@ -190,36 +210,17 @@ def inquiry_ask():
                     messages.append({"role": role, "content": content})
             messages.append({"role": "user", "content": question})
 
-            payload = _json.dumps({
-                "model":    model,
-                "messages": messages,
-                "stream":   True,
-                "options":  {"num_predict": 1024, "num_ctx": 8192, "temperature": 0.2},
-            }, ensure_ascii=False).encode("utf-8")
-
-            req = _ureq.Request(
-                "http://127.0.0.1:11434/api/chat",
-                data=payload,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-
+            options     = {"num_predict": 1024, "num_ctx": 8192, "temperature": 0.2}
             full_answer = ""
-            with _ureq.urlopen(req, timeout=None) as ollama_res:
-                for line in ollama_res:
-                    line = line.decode("utf-8").strip()
-                    if not line:
-                        continue
-                    try:
-                        obj   = _json.loads(line)
-                        chunk = obj.get("message", {}).get("content", "")
-                        if chunk:
-                            full_answer += chunk
-                            yield f"data: {_json.dumps({'type': 'chunk', 'chunk': chunk}, ensure_ascii=False)}\n\n"
-                        if obj.get("done"):
-                            break
-                    except Exception:
-                        pass
+
+            if is_local_mode(ai_mode):
+                for chunk in provider.chat_stream(messages, options=options):
+                    full_answer += chunk
+                    yield f"data: {_json.dumps({'type': 'chunk', 'chunk': chunk}, ensure_ascii=False)}\n\n"
+            else:
+                for chunk in provider.chat_stream(messages, api_key=api_key, options=options):
+                    full_answer += chunk
+                    yield f"data: {_json.dumps({'type': 'chunk', 'chunk': chunk}, ensure_ascii=False)}\n\n"
 
             yield f"data: {_json.dumps({'type': 'done', 'answer': full_answer}, ensure_ascii=False)}\n\n"
 
@@ -651,9 +652,11 @@ def vault_files_upload():
                 _file_summarize_status = {"status": "idle", "message": "中断されました"}
                 return
 
-            _file_summarize_status = {"status": "summarizing", "message": f"Ollamaで整形中: {file.filename}"}
-            import urllib.request as _ureq2, json as _json2
-            from app.services.transcriber import _get_ollama_model
+            _file_summarize_status = {"status": "summarizing", "message": f"LLMで整形中: {file.filename}"}
+            from app.services.transcriber import _read_env as _tr_read_env
+            _env     = _tr_read_env()
+            _ai_mode = _env.get("AI_MODE", "ollama")
+
             _file_prompt = (
                 "以下はファイルから抽出したテキストです。\n"
                 "元の内容を一切変えず・追加せず、そのまま読みやすく整理してください。\n"
@@ -664,27 +667,20 @@ def vault_files_upload():
                 "整理後のテキストのみ出力してください。\n\n"
                 f"{text}"
             )
-            _payload2 = _json2.dumps({
-                "model": _get_ollama_model(),
-                "prompt": _file_prompt,
-                "stream": False,
-            }).encode("utf-8")
-            _req2 = _ureq2.Request(
-                "http://127.0.0.1:11434/api/generate",
-                data=_payload2,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            _conn2 = _ureq2.urlopen(_req2, timeout=None)
-            try:
-                if abort_ev.is_set():
-                    _conn2.close()
-                    _file_summarize_status = {"status": "idle", "message": "中断されました"}
-                    return
-                _result2 = _json2.loads(_conn2.read().decode("utf-8"))
-                summary  = _result2.get("response", "").strip() or text
-            finally:
-                _conn2.close()
+
+            from app.services.llm import get_provider, is_local_mode
+            _provider = get_provider(_ai_mode)
+            _messages = [{"role": "user", "content": _file_prompt}]
+
+            if is_local_mode(_ai_mode):
+                summary = _provider.generate(_file_prompt)
+            else:
+                _api_key_name = getattr(_provider, "API_KEY_NAME", "")
+                _api_key      = _env.get(_api_key_name, "").strip() if _api_key_name else ""
+                if _api_key:
+                    summary = _provider.chat(_messages, api_key=_api_key, options={"temperature": 0.0, "max_tokens": 2048})
+                else:
+                    summary = text  # APIキー未設定時は元テキストをそのまま使用
 
             update_vault_file_summary(file_id, summary)
             print(f"[vault] ファイル要約完了: {file.filename}")
@@ -918,11 +914,11 @@ def vault_web_fetch():
                     create_vault_memo(page_title, "（テキストを抽出できませんでした）\nURL: " + url, category_id)
                     continue
 
-                # Ollamaで整形
+                # LLMで整形
                 _web_fetch_status["message"] = f"{i + 1} / {total} 整形中: {page_title[:30]}"
-                from app.services.transcriber import _summarize_ollama
-                import urllib.request as _ureq
-                import json as _json
+                from app.services.transcriber import _read_env as _tr_read_env
+                _env     = _tr_read_env()
+                _ai_mode = _env.get("AI_MODE", "ollama")
 
                 prompt = (
                     "以下はWebページから取得したテキストです。\n"
@@ -933,21 +929,19 @@ def vault_web_fetch():
                     f"{text}"
                 )
 
-                payload = _json.dumps({
-                    "model":  _summarize_ollama.__globals__.get("_get_ollama_model", lambda: "llama3.1:8b")(),
-                    "prompt": prompt,
-                    "stream": False,
-                }).encode("utf-8")
+                from app.services.llm import get_provider, is_local_mode
+                _provider = get_provider(_ai_mode)
+                _messages = [{"role": "user", "content": prompt}]
 
-                req2 = _ureq.Request(
-                    "http://127.0.0.1:11434/api/generate",
-                    data=payload,
-                    headers={"Content-Type": "application/json"},
-                    method="POST",
-                )
-                with _ureq.urlopen(req2, timeout=None) as res2:
-                    result   = _json.loads(res2.read().decode("utf-8"))
-                    arranged = result.get("response", "").strip()
+                if is_local_mode(_ai_mode):
+                    arranged = _provider.generate(prompt)
+                else:
+                    _api_key_name = getattr(_provider, "API_KEY_NAME", "")
+                    _api_key      = _env.get(_api_key_name, "").strip() if _api_key_name else ""
+                    if _api_key:
+                        arranged = _provider.chat(_messages, api_key=_api_key, options={"temperature": 0.0, "max_tokens": 2048})
+                    else:
+                        arranged = text
 
                 body = "URL: " + url + "\n\n" + (arranged or text)
                 create_vault_memo(page_title, body, category_id)
@@ -1273,19 +1267,27 @@ def _write_env(data: dict) -> None:
 def settings_get():
     """
     現在の設定を返す（APIキーはマスキング）。
-    Response: {"ai_mode": str, "groq_api_key": str}
     """
     env = _read_env()
-    api_key = env.get("GROQ_API_KEY", "")
-    # 画面表示用に末尾4文字以外をマスク
-    masked = ("*" * (len(api_key) - 4) + api_key[-4:]) if len(api_key) > 4 else api_key
+
+    def _mask(key_name: str) -> dict:
+        val    = env.get(key_name, "")
+        masked = ("*" * (len(val) - 4) + val[-4:]) if len(val) > 4 else val
+        return {"value": masked, "has_key": bool(val)}
+
     return jsonify({
-        "ai_mode":             env.get("AI_MODE", "personal"),
-        "groq_api_key":        masked,
-        "has_groq_key":        bool(api_key),
+        "ai_mode":             env.get("AI_MODE", "ollama"),
+        "groq_api_key":        _mask("GROQ_API_KEY")["value"],
+        "has_groq_key":        _mask("GROQ_API_KEY")["has_key"],
+        "openai_api_key":      _mask("OPENAI_API_KEY")["value"],
+        "has_openai_key":      _mask("OPENAI_API_KEY")["has_key"],
+        "gemini_api_key":      _mask("GEMINI_API_KEY")["value"],
+        "has_gemini_key":      _mask("GEMINI_API_KEY")["has_key"],
+        "anthropic_api_key":   _mask("ANTHROPIC_API_KEY")["value"],
+        "has_anthropic_key":   _mask("ANTHROPIC_API_KEY")["has_key"],
         "recording_source":    env.get("RECORDING_SOURCE", "mic"),
         "recording_device_id": env.get("RECORDING_DEVICE_ID", ""),
-        "ollama_model":        env.get("OLLAMA_MODEL", "llama3.1:8b"),
+        "ollama_model":        env.get("OLLAMA_MODEL", "gemma3:27b"),
     }), 200
 
 
@@ -1293,30 +1295,40 @@ def settings_get():
 def settings_save():
     """
     設定を `.env` ファイルに保存する。
-    Request JSON: {"ai_mode": str, "groq_api_key": str}
+    Request JSON: {"ai_mode": str, "groq_api_key": str, ...}
     Response: {"status": "saved"}
     """
-    data = request.get_json(silent=True) or {}
-    ai_mode    = data.get("ai_mode", "personal")
-    groq_key  = data.get("groq_api_key", "").strip()
-    device_id = data.get("recording_device_id", "")
+    data       = request.get_json(silent=True) or {}
+    ai_mode    = data.get("ai_mode", "ollama")
     rec_source = data.get("recording_source", "mic")
+    device_id  = data.get("recording_device_id", "")
 
-    ollama_model = data.get("ollama_model", "").strip()
     save_data = {"AI_MODE": ai_mode, "RECORDING_SOURCE": rec_source}
+
+    # Ollamaモデル
+    ollama_model = data.get("ollama_model", "").strip()
     if ollama_model:
         save_data["OLLAMA_MODEL"] = ollama_model
-    # キーが入力されていれば保存（マスク済みの場合は上書きしない）
-    if groq_key and not groq_key.startswith("*"):
-        save_data["GROQ_API_KEY"] = groq_key
-    # デバイスID（空文字・マイナス値は保存しない＝デフォルトデバイス使用）
+
+    # 各APIキー（マスク済み・空の場合は上書きしない）
+    for key_field, env_key in [
+        ("groq_api_key",      "GROQ_API_KEY"),
+        ("openai_api_key",    "OPENAI_API_KEY"),
+        ("gemini_api_key",    "GEMINI_API_KEY"),
+        ("anthropic_api_key", "ANTHROPIC_API_KEY"),
+    ]:
+        val = data.get(key_field, "").strip()
+        if val and not val.startswith("*"):
+            save_data[env_key] = val
+
+    # デバイスID
     if device_id and str(device_id).isdigit():
         save_data["RECORDING_DEVICE_ID"] = str(device_id)
 
     try:
         _write_env(save_data)
-        # ビジネス用モードに切り替えた場合はモデルをバックグラウンドでプリロード
-        if ai_mode == "business":
+        # Ollamaモードに切り替えた場合はモデルをバックグラウンドでプリロード
+        if ai_mode == "ollama":
             import platform as _platform
             is_win = _platform.system() == "Windows"
             is_arm = _platform.machine() in ("arm64", "aarch64")
@@ -1328,6 +1340,13 @@ def settings_save():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+
+
+@app.route("/api/llm/providers", methods=["GET"])
+def llm_providers():
+    """llm/配下のプロバイダー一覧を返す（設定画面の選択肢生成用）"""
+    from app.services.llm import get_all_providers
+    return jsonify(get_all_providers()), 200
 
 
 @app.route("/api/ollama/models", methods=["GET"])
@@ -1385,12 +1404,13 @@ def clean_only():
 
     try:
         env     = _read_env()
-        ai_mode = env.get("AI_MODE", "personal")
+        ai_mode = env.get("AI_MODE", "ollama")
 
         import app.services.transcriber as _tr
-        if ai_mode == "business":
+        if ai_mode == "ollama":
             cleaned = _tr._clean_transcript_ollama(record["transcript"], progress_cb=on_progress)
         else:
+            # クラウドAPIモード：Groq Whisperは不要・LLMのみ使用
             api_key = env.get("GROQ_API_KEY", "").strip()
             if not api_key:
                 return jsonify({"status": "error", "message": "Groq APIキーが設定されていません"}), 400
@@ -1481,7 +1501,11 @@ def personas_create():
     prompt = data.get("system_prompt", "").strip()
     if not name:
         return jsonify({"status": "error", "message": "名前は必須です"}), 400
-    return jsonify(create_persona(name, role, prompt)), 200
+    result = create_persona(name, role, prompt)
+    if result.get("status") == "ok":
+        # 新規ペルソナを「グループなし」に追加
+        add_persona_to_default_group(name)
+    return jsonify(result), 200
 
 
 @app.route("/api/personas/<string:persona_name>", methods=["PUT"])
@@ -1495,13 +1519,56 @@ def personas_update(persona_name: str):
     # 後方互換：enabled のみの更新も受け付ける
     if "enabled" in data and len(data) == 1:
         return jsonify(update_persona_enabled(persona_name, enabled)), 200
-    return jsonify(update_persona(persona_name, new_name, role, prompt, enabled)), 200
+    result = update_persona(persona_name, new_name, role, prompt, enabled)
+    # ペルソナ名が変わった場合はグループのメンバー名も自動更新
+    if result.get("status") == "ok" and new_name != persona_name:
+        with get_connection() as conn:
+            conn.execute(
+                "UPDATE persona_group_members SET persona_name=? WHERE persona_name=?",
+                (new_name, persona_name)
+            )
+            conn.commit()
+    return jsonify(result), 200
 
 
 @app.route("/api/personas/<string:persona_name>", methods=["DELETE"])
 def personas_delete(persona_name: str):
     """ペルソナを削除する"""
+    remove_persona_from_all_groups(persona_name)
     return jsonify(delete_persona(persona_name)), 200
+
+
+@app.route("/api/persona_groups", methods=["GET"])
+def persona_groups_get():
+    """ペルソナグループ一覧をメンバー付きで返す"""
+    return jsonify(get_all_persona_groups()), 200
+
+
+@app.route("/api/persona_groups", methods=["POST"])
+def persona_groups_create():
+    """グループを新規作成する"""
+    data = request.get_json(silent=True) or {}
+    name = data.get("name", "").strip()
+    if not name:
+        return jsonify({"status": "error", "message": "グループ名は必須です"}), 400
+    return jsonify(create_persona_group(name)), 200
+
+
+@app.route("/api/persona_groups/<int:group_id>", methods=["PUT"])
+def persona_groups_update(group_id: int):
+    """グループ名とメンバーを更新する"""
+    data    = request.get_json(silent=True) or {}
+    name    = data.get("name", "").strip()
+    members = data.get("members", [])
+    if not name:
+        return jsonify({"status": "error", "message": "グループ名は必須です"}), 400
+    return jsonify(update_persona_group(group_id, name, members)), 200
+
+
+@app.route("/api/persona_groups/<int:group_id>", methods=["DELETE"])
+def persona_groups_delete(group_id: int):
+    """グループを削除する（メンバーは「グループなし」に移動）"""
+    return jsonify(delete_persona_group(group_id)), 200
 
 
 @app.route("/api/council/ask", methods=["POST"])
@@ -1602,15 +1669,13 @@ def council_ask():
             # 分割できない場合はそのまま
             return raw_context
 
-        ai_mode = env.get("AI_MODE", "personal")
+        ai_mode = env.get("AI_MODE", "ollama")
         model   = _get_ollama_model()
 
         relevant_blocks = []
         for block in blocks:
-            # タイトル行を取得（先頭の[...]行）
             first_line = block.split('\n')[0]
-            # 本文の先頭200文字でスニペット
-            snippet = block[:300]
+            snippet    = block[:300]
 
             judge_prompt = (
                 f"以下の「参考情報」は、「質問」に回答する際に役立つ情報ですか？\n\n"
@@ -1620,7 +1685,10 @@ def council_ask():
             )
 
             try:
-                if ai_mode == "business":
+                from app.services.llm import get_provider, is_local_mode
+                provider = get_provider(ai_mode)
+
+                if is_local_mode(ai_mode):
                     import json as _j, urllib.request as _ur
                     payload = _j.dumps({
                         "model": model,
@@ -1638,31 +1706,20 @@ def council_ask():
                         result = _j.loads(res.read())
                     answer = result.get("message", {}).get("content", "").strip().lower()
                 else:
-                    # Groq使用時
-                    import json as _j
-                    api_key = env.get("GROQ_API_KEY", "").strip()
+                    api_key_name = getattr(provider, "API_KEY_NAME", "")
+                    api_key      = env.get(api_key_name, "").strip() if api_key_name else ""
                     if not api_key:
                         relevant_blocks.append(block)
                         continue
-                    from groq import Groq
-                    client = Groq(api_key=api_key)
-                    resp = client.chat.completions.create(
-                        model="llama-3.3-70b-versatile",
-                        messages=[{"role": "user", "content": judge_prompt}],
-                        max_tokens=5,
-                        temperature=0,
-                    )
-                    answer = resp.choices[0].message.content.strip().lower()
+                    messages = [{"role": "user", "content": judge_prompt}]
+                    answer   = provider.chat(messages, api_key=api_key, options={"temperature": 0, "max_tokens": 5}).lower()
 
-                # 「はい」を含む場合のみ追加
                 if "はい" in answer or "yes" in answer:
                     relevant_blocks.append(block)
-                # 判定不能（空・エラー等）はそのまま追加
                 elif not answer:
                     relevant_blocks.append(block)
 
             except Exception:
-                # 判定失敗時は安全側でそのまま追加
                 relevant_blocks.append(block)
 
         return "\n\n".join(relevant_blocks)
@@ -1703,14 +1760,27 @@ def council_ask():
         ollama_res = None  # クライアント切断時に閉じるための参照
         try:
             env     = _read_env()
-            ai_mode = env.get("AI_MODE", "personal")
-            model   = _get_ollama_model()
+            ai_mode = env.get("AI_MODE", "ollama")
+
+            from app.services.llm import get_provider, is_local_mode
+            provider = get_provider(ai_mode)
+            if provider is None:
+                yield f"data: {_json.dumps({'type': 'error', 'message': f'不明なAIモード: {ai_mode}'}, ensure_ascii=False)}\n\n"
+                return
+
+            # クラウドモード時のAPIキー取得
+            api_key = ""
+            if not is_local_mode(ai_mode):
+                api_key_name = getattr(provider, "API_KEY_NAME", "")
+                api_key      = env.get(api_key_name, "").strip() if api_key_name else ""
+                if not api_key:
+                    yield f"data: {_json.dumps({'type': 'error', 'message': f'{provider.DISPLAY_NAME} のAPIキーが設定されていません'}, ensure_ascii=False)}\n\n"
+                    return
 
             # ── 関連性フィルタリングを事前に実行（全ペルソナ共通） ──
             filtered_context = filter_relevant_context(question, context_text, env)
 
             for persona_name in persona_names:
-                # DBからペルソナ定義を取得
                 p_db = persona_db_map.get(persona_name)
                 if p_db and p_db.get('system_prompt'):
                     base_prompt = p_db['system_prompt'] + PERSONA_FORMAT_SUFFIX
@@ -1718,17 +1788,13 @@ def council_ask():
                     base_prompt = f"あなたは{persona_name}の専門家です。自分の立場から400字以内・日本語で答えてください。"
                 system_content = PERSONA_COMMON_PREFIX + base_prompt
 
-                # ── user メッセージ：情報を明確に分離して構造化 ──
                 parts_msg = []
-
-                # ① 関連性フィルタ済みのカテゴリ参考情報のみ渡す
                 if filtered_context:
                     parts_msg.append(
                         "■ 参考情報（相談内容に関連すると判断されたデータ）\n"
                         f"{filtered_context}"
                     )
 
-                # ③ このペルソナの過去の高評価回答（★3以上）を参考として渡す
                 try:
                     high_rated = get_highly_rated_answers(persona_name, limit=2)
                     if high_rated:
@@ -1739,98 +1805,54 @@ def council_ask():
                 except Exception:
                     pass
 
-                # ④ 質問本文
                 parts_msg.append(f"■ 相談内容\n{question}")
-
                 user_content = "\n\n" + "\n\n".join(parts_msg)
 
                 yield f"data: {_json.dumps({'type': 'start', 'persona': persona_name}, ensure_ascii=False)}\n\n"
 
                 full_answer = ""
                 try:
-                    if ai_mode == "business":
-                        # ── Ollama: /api/chat でロール分離 ──
-                        messages = [{"role": "system", "content": system_content}]
-                        # 連続相談の会話履歴を追加
-                        for h in council_history:
-                            role = h.get("role", "user")
-                            hcontent = h.get("content", "")
-                            if role in ("user", "assistant") and hcontent:
-                                messages.append({"role": role, "content": hcontent})
-                        messages.append({"role": "user", "content": user_content})
-                        payload = _json.dumps({
-                            "model": model,
-                            "messages": messages,
-                            "stream": True,
-                            "options": {
-                                "temperature": PERSONA_TEMPERATURE.get(persona_name, DEFAULT_TEMPERATURE),
-                                "num_predict": 1024,
-                                "num_ctx": 4096,
-                            },
-                        }).encode("utf-8")
-                        req = _ureq.Request(
-                            "http://127.0.0.1:11434/api/chat",
-                            data=payload,
-                            headers={"Content-Type": "application/json"},
-                            method="POST",
-                        )
-                        with _ureq.urlopen(req, timeout=60) as ollama_res:
-                            for line in ollama_res:
-                                line = line.decode("utf-8").strip()
-                                if not line:
-                                    continue
-                                try:
-                                    obj   = _json.loads(line)
-                                    chunk = obj.get("message", {}).get("content", "")
-                                    if chunk:
-                                        full_answer += chunk
-                                        yield f"data: {_json.dumps({'type': 'chunk', 'persona': persona_name, 'chunk': chunk}, ensure_ascii=False)}\n\n"
-                                    if obj.get("done"):
-                                        break
-                                except Exception:
-                                    pass
+                    messages = [{"role": "system", "content": system_content}]
+                    for h in council_history:
+                        role     = h.get("role", "user")
+                        hcontent = h.get("content", "")
+                        if role in ("user", "assistant") and hcontent:
+                            messages.append({"role": role, "content": hcontent})
+                    messages.append({"role": "user", "content": user_content})
+
+                    options = {
+                        "temperature": PERSONA_TEMPERATURE.get(persona_name, DEFAULT_TEMPERATURE),
+                        "num_predict": 1024,
+                        "num_ctx":     4096,
+                    }
+
+                    if is_local_mode(ai_mode):
+                        for chunk in provider.chat_stream(messages, options=options):
+                            full_answer += chunk
+                            yield f"data: {_json.dumps({'type': 'chunk', 'persona': persona_name, 'chunk': chunk}, ensure_ascii=False)}\n\n"
                     else:
-                        # ── Groq ──
-                        api_key = env.get("GROQ_API_KEY", "").strip()
-                        if not api_key:
-                            raise ValueError("Groq APIキーが未設定です")
-                        from groq import Groq
-                        client = Groq(api_key=api_key)
-                        stream = client.chat.completions.create(
-                            model="llama-3.3-70b-versatile",
-                            messages=[
-                                {"role": "system", "content": system_content},
-                                {"role": "user",   "content": user_content},
-                            ],
-                            max_tokens=400,
-                            stream=True,
-                        )
-                        for chunk_obj in stream:
-                            chunk = chunk_obj.choices[0].delta.content or ""
-                            if chunk:
-                                full_answer += chunk
-                                yield f"data: {_json.dumps({'type': 'chunk', 'persona': persona_name, 'chunk': chunk}, ensure_ascii=False)}\n\n"
+                        for chunk in provider.chat_stream(messages, api_key=api_key, options=options):
+                            full_answer += chunk
+                            yield f"data: {_json.dumps({'type': 'chunk', 'persona': persona_name, 'chunk': chunk}, ensure_ascii=False)}\n\n"
 
                 except Exception as e:
                     err_msg = str(e)
                     print(f"[council] ペルソナ '{persona_name}' エラー: {err_msg}")
                     yield f"data: {_json.dumps({'type': 'error', 'message': err_msg}, ensure_ascii=False)}\n\n"
-                    full_answer = ""  # エラー時は空にして done を送らない
-                    continue  # 次のペルソナへ
+                    full_answer = ""
+                    continue
 
                 yield f"data: {_json.dumps({'type': 'done', 'persona': persona_name, 'answer': full_answer}, ensure_ascii=False)}\n\n"
 
             yield f"data: {_json.dumps({'type': 'finished'}, ensure_ascii=False)}\n\n"
 
         except GeneratorExit:
-            # クライアントが切断（リロード・ページ離脱）→ Ollama接続を即座に閉じる
-            print("[council] クライアント切断を検知。Ollama処理を中断します。")
+            print("[council] クライアント切断を検知。処理を中断します。")
             try:
                 if ollama_res:
                     ollama_res.close()
             except Exception:
                 pass
-            # Ollama に中断リクエストを送る（/api/generate/cancel は未対応のため接続クローズのみ）
             return
 
         except Exception as e:
@@ -1934,12 +1956,18 @@ def council_session_update(session_id: int):
 
     update_council_session_decision(session_id, final_decision)
 
-    # 採用回答を追加（重複しないよう既存を確認）
-    for a in adopted_list:
-        pname  = a.get("persona_name", "").strip()
-        answer = a.get("answer", "").strip()
-        if pname and answer:
-            create_council_adopted(session_id, pname, answer)
+    # 採用回答がある場合は既存を削除して再登録（上書き）
+    if adopted_list:
+        with get_connection() as conn:
+            conn.execute(
+                "DELETE FROM council_adopted WHERE session_id=?", (session_id,)
+            )
+            conn.commit()
+        for a in adopted_list:
+            pname  = a.get("persona_name", "").strip()
+            answer = a.get("answer", "").strip()
+            if pname and answer:
+                create_council_adopted(session_id, pname, answer)
 
     return jsonify({"status": "ok", "session_id": session_id}), 200
 
@@ -2077,13 +2105,17 @@ def _open_browser():
 
 
 def _auto_preload_model():
-    """起動時にビジネス用モードなら自動でモデルをプリロードする"""
+    """起動時にOllamaモードなら自動でモデルをプリロードする"""
+    # Flaskデバッグモードはリローダーが親・子の2プロセスを起動する
+    # WERKZEUG_RUN_MAIN=true の子プロセスのみで実行し、2重ロードを防ぐ
+    if not getattr(sys, "frozen", False):
+        if os.environ.get("WERKZEUG_RUN_MAIN") != "true":
+            return
     try:
         env = _read_env()
-        if env.get("AI_MODE") == "business":
+        if env.get("AI_MODE") == "ollama":
             import platform as _platform
             system = _platform.system()
-            # Windows・Mac・Linux すべてで実行
             if system in ("Windows", "Darwin", "Linux"):
                 from app.services.transcriber import preload_model
                 preload_model()

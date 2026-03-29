@@ -114,18 +114,16 @@ async function checkApiKey() {
     const res  = await fetch('/api/settings');
     const data = await res.json();
 
-    // ビジネス用モードはAPIキー不要
-    if (data.ai_mode === 'business') return;
+    // Ollamaモードはキー不要
+    if (data.ai_mode === 'ollama') return;
 
-    // 個人用モードでAPIキー未設定の場合
+    // クラウドモードでGroqキー未設定の場合（文字起こしに必要）
     if (!data.has_groq_key) {
-      // バナーを表示
       document.getElementById('apiWarningBanner').style.display = 'flex';
-      // 録音ボタンを無効化
       const btn = document.getElementById('recordBtn');
       btn.disabled = true;
-      btn.title = 'APIキーを設定してください';
-      document.getElementById('recordLabel').textContent = '設定画面でAPIキーを入力してください';
+      btn.title = 'Groq APIキーを設定してください';
+      document.getElementById('recordLabel').textContent = '設定画面でGroq APIキーを入力してください';
     }
   } catch (e) {
     // 設定取得失敗時は何もしない
@@ -135,6 +133,7 @@ async function checkApiKey() {
 // ── 波形ビジュアライザー ──────────────────────────
 function buildVisualizer() {
   const v = document.getElementById('visualizer');
+  if (!v) return; // visualizer要素がない画面では何もしない
   for (let i = 0; i < 40; i++) {
     const bar = document.createElement('div');
     bar.className = 'visualizer-bar';
@@ -991,8 +990,16 @@ async function updateSettingsBadge() {
     const res      = await fetch('/api/settings');
     const settings = await res.json();
 
-    const isSystem   = settings.recording_source === 'system';
-    const isBusiness = settings.ai_mode === 'business';
+    const isSystem  = settings.recording_source === 'system';
+    const isLocal   = settings.ai_mode === 'ollama';
+    const modeLabels = {
+      ollama: '🏠 Ollama（完全ローカル）',
+      groq:   '⚡ Groq (Llama-3.3-70b)',
+      openai: '🤖 OpenAI (GPT-4o)',
+      gemini: '✨ Google (Gemini)',
+      claude: '🔷 Anthropic (Claude)',
+    };
+    const modeLabel = modeLabels[settings.ai_mode] || settings.ai_mode;
 
     const rows = [
       {
@@ -1002,10 +1009,10 @@ async function updateSettingsBadge() {
         noticeText: isSystem ? 'PCのすべての音声を録音します' : 'オンライン会議の音声は録音されません',
       },
       {
-        badgeClass: isBusiness ? 'settings-badge settings-badge-business' : 'settings-badge',
-        badgeText:  isBusiness ? '🏢 ビジネス用（faster-whisper）' : '⚡ 個人用（Groq API）',
-        noticeIcon: isBusiness ? '🔒' : '☁️',
-        noticeText: isBusiness ? '音声データはクラウドに送信されません' : '音声データはクラウドに送信されます',
+        badgeClass: isLocal ? 'settings-badge settings-badge-business' : 'settings-badge',
+        badgeText:  modeLabel,
+        noticeIcon: isLocal ? '🔒' : '☁️',
+        noticeText: isLocal ? '音声データはクラウドに送信されません' : '音声データはクラウドに送信されます',
       },
     ];
 
@@ -1032,7 +1039,7 @@ async function checkModelReady() {
   try {
     const settingsRes = await fetch('/api/settings');
     const settings    = await settingsRes.json();
-    if (settings.ai_mode !== 'business') return; // 個人用モードは不要
+    if (settings.ai_mode !== 'ollama') return; // Ollamaモード以外は不要
 
     const res  = await fetch('/api/model/status');
     const data = await res.json();

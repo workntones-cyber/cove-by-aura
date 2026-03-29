@@ -305,7 +305,12 @@ def init_db() -> None:
         if 'rating' not in adopted_cols:
             conn.execute("ALTER TABLE council_adopted ADD COLUMN rating INTEGER NOT NULL DEFAULT 0")
 
+        # ── ペルソナグループテーブル ──────────────────
+        _init_persona_groups(conn)
+
         conn.commit()
+    # グループメンバーの重複・孤立レコードをクリーンアップ
+    cleanup_persona_group_members()
     print("[database] 初期化完了")
 
 
@@ -882,3 +887,229 @@ def get_context_for_categories(category_ids: list) -> dict:
         "files":      [dict(f) for f in files],
         "sessions":   [dict(s) for s in sessions],
     }
+
+
+# ══════════════════════════════════════════════════
+#  ペルソナグループ操作
+# ══════════════════════════════════════════════════
+
+def _init_persona_groups(conn) -> None:
+    """ペルソナグループテーブルを初期化する（init_db内から呼ぶ）"""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS persona_groups (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            name       TEXT    NOT NULL UNIQUE,
+            is_system  INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT    NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS persona_group_members (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id     INTEGER NOT NULL
+                         REFERENCES persona_groups(id) ON DELETE CASCADE,
+            persona_name TEXT    NOT NULL,
+            UNIQUE(group_id, persona_name)
+        )
+    """)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # ── グループなし（id=1・システム固定・削除不可） ──
+    conn.execute("""
+        INSERT OR IGNORE INTO persona_groups (id, name, is_system, created_at)
+        VALUES (1, 'グループなし', 1, ?)
+    """, (now,))
+
+    # ── 会社組織（id=2・デフォルト8名） ──────────────
+    conn.execute("""
+        INSERT OR IGNORE INTO persona_groups (id, name, is_system, created_at)
+        VALUES (2, '会社組織', 0, ?)
+    """, (now,))
+
+    company_members = ['戦略家', 'リスク管理者', 'アナリスト', 'クリエイター',
+                       '法務・コンプラ', 'ユーザー視点', 'クレーマー', 'マーケッター']
+    for name in company_members:
+        conn.execute("""
+            INSERT OR IGNORE INTO persona_group_members (group_id, persona_name)
+            VALUES (2, ?)
+        """, (name,))
+
+    # ── マイグレーション：整合性の修正 ───────────────
+    # 既存DBでグループなし(id=1)に全員登録されている場合、
+    # 会社組織(id=2)メンバーをグループなしから除外する
+    for name in company_members:
+        # 会社組織に所属しているペルソナはグループなしから削除
+        conn.execute("""
+            DELETE FROM persona_group_members
+            WHERE group_id = 1 AND persona_name = ?
+        """, (name,))
+
+    # アーカイバーは全グループから除外
+    conn.execute("""
+        DELETE FROM persona_group_members WHERE persona_name = 'アーカイバー'
+    """)
+
+    # どのグループにも所属していないペルソナ（アーカイバー除く）を「グループなし」に追加
+    all_personas = conn.execute(
+        "SELECT persona_name FROM persona_settings WHERE persona_name != 'アーカイバー'"
+    ).fetchall()
+    for row in all_personas:
+        pname = row['persona_name']
+        # 会社組織メンバーはスキップ
+        if pname in company_members:
+            continue
+        # 他グループに所属しているかチェック
+        in_group = conn.execute(
+            "SELECT id FROM persona_group_members WHERE persona_name = ? AND group_id != 1",
+            (pname,)
+        ).fetchone()
+        if not in_group:
+            conn.execute("""
+                INSERT OR IGNORE INTO persona_group_members (group_id, persona_name)
+                VALUES (1, ?)
+            """, (pname,))
+
+
+def get_all_persona_groups() -> list[dict]:
+    """全グループ一覧をメンバー付きで返す"""
+    with get_connection() as conn:
+        groups = conn.execute(
+            "SELECT id, name, is_system FROM persona_groups ORDER BY id"
+        ).fetchall()
+        result = []
+        for g in groups:
+            members = conn.execute(
+                "SELECT persona_name FROM persona_group_members WHERE group_id=? ORDER BY rowid",
+                (g['id'],)
+            ).fetchall()
+            d = dict(g)
+            d['members'] = [m['persona_name'] for m in members]
+            result.append(d)
+    return result
+
+
+def create_persona_group(name: str) -> dict:
+    """グループを新規作成する"""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with get_connection() as conn:
+            cursor = conn.execute(
+                "INSERT INTO persona_groups (name, is_system, created_at) VALUES (?, 0, ?)",
+                (name.strip(), now)
+            )
+            conn.commit()
+        return {"status": "ok", "id": cursor.lastrowid}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+def update_persona_group(group_id: int, name: str, members: list) -> dict:
+    """グループ名とメンバー一覧を更新する（上限14名）"""
+    if group_id == 1:
+        return {"status": "error", "message": "グループなしは編集できません"}
+    if len(members) > 14:
+        return {"status": "error", "message": "1グループの上限は14名です"}
+    try:
+        with get_connection() as conn:
+            # 更新前のメンバーを取得
+            old_members = [r["persona_name"] for r in conn.execute(
+                "SELECT persona_name FROM persona_group_members WHERE group_id=?", (group_id,)
+            ).fetchall()]
+
+            conn.execute("UPDATE persona_groups SET name=? WHERE id=?", (name.strip(), group_id))
+            conn.execute("DELETE FROM persona_group_members WHERE group_id=?", (group_id,))
+            for persona_name in members:
+                # このグループに追加 → 他グループ（グループなし含む）から除外
+                conn.execute(
+                    "DELETE FROM persona_group_members WHERE persona_name=?", (persona_name,)
+                )
+                conn.execute(
+                    "INSERT INTO persona_group_members (group_id, persona_name) VALUES (?, ?)",
+                    (group_id, persona_name)
+                )
+
+            # グループから外れたペルソナ → グループなしへ移動
+            removed = [p for p in old_members if p not in members]
+            for persona_name in removed:
+                conn.execute(
+                    "INSERT OR IGNORE INTO persona_group_members (group_id, persona_name) VALUES (1, ?)",
+                    (persona_name,)
+                )
+
+            conn.commit()
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+def delete_persona_group(group_id: int) -> dict:
+    """グループを削除する（メンバーは「グループなし」に移動）"""
+    if group_id == 1:
+        return {"status": "error", "message": "グループなしは削除できません"}
+    try:
+        with get_connection() as conn:
+            members = conn.execute(
+                "SELECT persona_name FROM persona_group_members WHERE group_id=?",
+                (group_id,)
+            ).fetchall()
+            conn.execute("DELETE FROM persona_groups WHERE id=?", (group_id,))
+            # メンバーを全員グループなしへ移動
+            for m in members:
+                conn.execute(
+                    "INSERT OR IGNORE INTO persona_group_members (group_id, persona_name) VALUES (1, ?)",
+                    (m["persona_name"],)
+                )
+            conn.commit()
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+def add_persona_to_default_group(persona_name: str) -> None:
+    """新規ペルソナを「グループなし」に追加する"""
+    with get_connection() as conn:
+        conn.execute("""
+            INSERT OR IGNORE INTO persona_group_members (group_id, persona_name)
+            VALUES (1, ?)
+        """, (persona_name,))
+        conn.commit()
+
+
+def remove_persona_from_all_groups(persona_name: str) -> None:
+    """ペルソナ削除時に全グループから除外する"""
+    with get_connection() as conn:
+        conn.execute(
+            "DELETE FROM persona_group_members WHERE persona_name=?",
+            (persona_name,)
+        )
+        conn.commit()
+
+
+def cleanup_persona_group_members() -> None:
+    """
+    persona_group_membersの重複・孤立レコードをクリーンアップする。
+    ペルソナが存在しないメンバーレコードを削除し、
+    複数グループに所属しているペルソナを1グループに整理する。
+    """
+    with get_connection() as conn:
+        # 存在しないペルソナのメンバーレコードを削除
+        conn.execute("""
+            DELETE FROM persona_group_members
+            WHERE persona_name NOT IN (SELECT persona_name FROM persona_settings)
+        """)
+        # アーカイバーを全グループから除外
+        conn.execute(
+            "DELETE FROM persona_group_members WHERE persona_name = 'アーカイバー'"
+        )
+        # 複数グループに所属しているペルソナを検出して整理
+        # グループなし(id=1)以外に所属があれば、グループなしから削除
+        conn.execute("""
+            DELETE FROM persona_group_members
+            WHERE group_id = 1
+              AND persona_name IN (
+                SELECT persona_name FROM persona_group_members
+                WHERE group_id != 1
+              )
+        """)
+        conn.commit()
+    print("[database] persona_group_membersクリーンアップ完了")

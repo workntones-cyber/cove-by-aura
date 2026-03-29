@@ -3,15 +3,16 @@ transcriber.py
 文字起こし & AI要約サービス
 
 AIモードに応じて以下を切り替える：
-  - personal  : Groq API（Whisper文字起こし + LLaMA要約）
-  - business  : faster-whisper（文字起こし）+ Ollama（要約）完全ローカル
+  - ollama  : faster-whisper（文字起こし）+ Ollama（要約）完全ローカル
+  - groq    : Groq Whisper API（文字起こし）+ Groq LLaMA（要約）
+  - openai  : Groq Whisper API（文字起こし）+ OpenAI GPT-4o（要約）
+  - gemini  : Groq Whisper API（文字起こし）+ Google Gemini（要約）
+  - claude  : Groq Whisper API（文字起こし）+ Anthropic Claude（要約）
 """
 
 import sys
 import time
 from pathlib import Path
-
-from groq import Groq
 
 # ── 設定 ──────────────────────────────────────────
 import sys as _sys
@@ -21,8 +22,9 @@ if getattr(_sys, "frozen", False):
 else:
     UPLOADS_DIR = Path(__file__).resolve().parent.parent.parent / "uploads"
     ENV_PATH    = Path(__file__).resolve().parent.parent.parent / ".env"
-WHISPER_MODEL      = "whisper-large-v3-turbo"   # 文字起こし用
-SUMMARY_MODEL      = "llama-3.3-70b-versatile"  # 要約用
+
+WHISPER_MODEL      = "whisper-large-v3-turbo"   # Groq Whisper文字起こし用
+SUMMARY_MODEL      = "llama-3.3-70b-versatile"  # Groq要約用
 RETRY_COUNT        = 3
 RETRY_WAIT         = 30  # 429エラー時のリトライ間隔（秒）
 
@@ -48,20 +50,32 @@ def transcribe_and_summarize(wav_filename: str, extra_prompt: str = "", record_i
     progress_callback(step, message, progress): 進捗通知コールバック
     """
     env     = _read_env()
-    ai_mode = env.get("AI_MODE", "personal")
+    ai_mode = env.get("AI_MODE", "ollama")
 
-    if ai_mode == "business":
+    if ai_mode == "ollama":
+        # 旧business互換も含む完全ローカル処理
         return _transcribe_faster_whisper(wav_filename, extra_prompt, record_id, abort_event=abort_event, progress_callback=progress_callback)
     else:
-        return _transcribe_groq(wav_filename, env)
+        # クラウドAPIモード：文字起こしはGroq Whisper共通
+        return _transcribe_groq_whisper_cloud(wav_filename, extra_prompt, env, record_id=record_id, abort_event=abort_event, progress_callback=progress_callback)
 
 
-# ── Groq API（個人用） ────────────────────────────
-def _transcribe_groq(wav_filename: str, env: dict) -> dict:
-    api_key = env.get("GROQ_API_KEY", "").strip()
-    if not api_key:
+# ── Groq Whisper文字起こし + クラウドLLM要約 ──────
+def _transcribe_groq_whisper_cloud(wav_filename: str, extra_prompt: str, env: dict, record_id: int = None, abort_event=None, progress_callback=None) -> dict:
+    """
+    文字起こし：Groq Whisper API（クラウドAPIモード共通）
+    要約      ：選択されたクラウドLLM（groq / openai / gemini / claude）
+    """
+    def _cb(step, message, progress):
+        if progress_callback:
+            progress_callback(step, message, progress)
+
+    ai_mode = env.get("AI_MODE", "groq")
+    groq_key = env.get("GROQ_API_KEY", "").strip()
+
+    if not groq_key:
         return {
-            "status": "error",
+            "status":  "error",
             "message": "Groq APIキーが設定されていません。設定画面で入力してください。",
         }
 
@@ -70,64 +84,145 @@ def _transcribe_groq(wav_filename: str, env: dict) -> dict:
         return {"status": "error", "message": f"音声ファイルが見つかりません: {wav_filename}"}
 
     try:
-        client = Groq(api_key=api_key)
+        from groq import Groq
+        client = Groq(api_key=groq_key)
 
-        # ── ① 文字起こし（Whisper） ───────────────
-        print(f"[transcriber] 文字起こし開始: {wav_filename}")
+        # ── ① 文字起こし（Groq Whisper）──────────
+        _cb("transcribe", "🎙️ 文字起こし中…", 10)
+        print(f"[transcriber] Groq Whisper 文字起こし開始: {wav_filename}")
         raw_transcript = _call_whisper(client, wav_path)
-        print(f"[transcriber] 文字起こし完了: {len(raw_transcript)}文字")
+        print(f"[transcriber] Groq Whisper 文字起こし完了: {len(raw_transcript)}文字")
+        _cb("transcribe_done", f"🎙️ 文字起こし完了（{len(raw_transcript)}文字）", 35)
 
-        # ── ② 不要文字列除去（Groq LLaMA） ─────────
-        print(f"[transcriber] 不要文字列除去開始")
-        transcript = _clean_transcript_groq(client, raw_transcript)
+        if not raw_transcript:
+            return {"status": "error", "message": "文字起こし結果が空でした（無音または認識できませんでした）"}
 
-        # ── ③ 要約（Groq LLaMA） ─────────────────
-        print(f"[transcriber] 要約開始")
-        ai_summary = _call_llama(client, transcript)
-        print(f"[transcriber] 要約完了: {len(ai_summary)}文字")
+        if abort_event and abort_event.is_set():
+            return {"status": "error", "message": "処理が中断されました"}
+
+        # ── ② クリーニング（選択LLM）──────────────
+        _cb("cleaning", "🧹 クリーニング中…", 40)
+        cleaned = _clean_transcript_cloud(client, raw_transcript, ai_mode, env)
+        _cb("cleaning_done", "🧹 クリーニング完了", 60)
+
+        if abort_event and abort_event.is_set():
+            return {"status": "error", "message": "処理が中断されました"}
+
+        if record_id:
+            try:
+                from app.database import update_cleaned_transcript
+                update_cleaned_transcript(record_id, cleaned)
+            except Exception as e:
+                print(f"[transcriber] クリーニング保存エラー: {e}")
+
+        # ── ③ 要約（選択LLM）─────────────────────
+        _cb("summarizing", "✨ 要約中…", 65)
+        ai_summary = _summarize_cloud(cleaned, extra_prompt, ai_mode, env)
+        _cb("done", "✅ 完了！", 100)
 
         return {
             "status":             "done",
             "transcript":         raw_transcript,
-            "cleaned_transcript": transcript,
+            "cleaned_transcript": cleaned,
             "ai_summary":         ai_summary,
         }
 
     except Exception as e:
-        print(f"[transcriber] Groq エラー: {e}")
-        return {"status": "error", "message": f"Groq APIエラー: {str(e)}"}
+        print(f"[transcriber] クラウド処理エラー: {e}")
+        return {"status": "error", "message": f"処理エラー: {str(e)}"}
 
 
-# ── Whisper 文字起こし（チャンク対応・リトライ付き） ──
-def _call_whisper(client: Groq, wav_path: Path) -> str:
+def _clean_transcript_cloud(groq_client, raw_transcript: str, ai_mode: str, env: dict) -> str:
+    """クラウドLLMを使って文字起こしをクリーニングする"""
+    prompt = (
+        "以下は会議の音声を文字起こしした生テキストです。\n"
+        "挨拶・相槌・フィラー（あー、えーと等）・謝罪の定型文・会議開始終了の定型文を除去し、"
+        "議題・提案・質問・回答・意見・決定事項・数字・固有名詞を含む発言のみ残してください。\n"
+        "除去後のテキストのみ出力してください。\n\n"
+        f"【文字起こし】\n{raw_transcript}"
+    )
+    messages = [{"role": "user", "content": prompt}]
+    try:
+        result = _call_cloud_llm(messages, ai_mode, env, options={"temperature": 0.0, "max_tokens": 4096})
+        return result if result else raw_transcript
+    except Exception as e:
+        print(f"[transcriber] クリーニングエラー（元テキストを使用）: {e}")
+        return raw_transcript
+
+
+def _summarize_cloud(transcript: str, extra_prompt: str, ai_mode: str, env: dict) -> str:
+    """クラウドLLMで要約する"""
+    final_prompt = (
+        "あなたは経験豊富な議事録作成の専門家です。\n"
+        "以下は会議の内容をまとめたテキストです。\n\n"
+        "【議事録の形式】\n"
+        "## 会議の概要\n（目的・テーマ・雰囲気を簡潔に）\n\n"
+        "## 議題と議論の内容\n（各議題について提起された問題・意見・結論の流れ）\n\n"
+        "## 決定事項\n（合意・決定したことをすべて。なければ「特になし」）\n\n"
+        "## アクションアイテム\n（誰が・何を・いつまでに。なければ「特になし」）\n\n"
+        "## 未解決事項\n（継続検討事項。なければ「特になし」）\n\n"
+        "数字・固有名詞・日付は正確に記載。議事録のみ出力してください。\n\n"
+        + (f"【追加指示】\n{extra_prompt}\n\n" if extra_prompt else "")
+        + f"【会議内容】\n{transcript}"
+    )
+    messages = [{"role": "user", "content": final_prompt}]
+    try:
+        return _call_cloud_llm(messages, ai_mode, env, options={"temperature": 0.3, "max_tokens": 2048})
+    except Exception as e:
+        print(f"[transcriber] 要約エラー: {e}")
+        return "（要約に失敗しました）"
+
+
+def _call_cloud_llm(messages: list, ai_mode: str, env: dict, options: dict = None) -> str:
+    """
+    選択されたクラウドLLMを呼び出す（非ストリーミング）。
+    Ollamaモードでは呼ばれない。
+    """
+    from app.services.llm import get_provider
+    provider = get_provider(ai_mode)
+    if provider is None:
+        raise ValueError(f"不明なAIモード: {ai_mode}")
+
+    api_key_name = getattr(provider, "API_KEY_NAME", "")
+    api_key      = env.get(api_key_name, "").strip() if api_key_name else ""
+
+    if provider.REQUIRES_API_KEY and not api_key:
+        raise ValueError(f"{provider.DISPLAY_NAME} のAPIキーが設定されていません")
+
+    if provider.REQUIRES_API_KEY:
+        return provider.chat(messages, api_key=api_key, options=options)
+    else:
+        return provider.chat(messages, options=options)
+
+
+# ── Groq Whisper 文字起こし（チャンク対応・リトライ付き） ──
+def _call_whisper(client, wav_path: Path) -> str:
     """
     WAVファイルを25MB以下のチャンクに分割してWhisperに送信し、
     結果を結合して返す。
     """
-    MAX_BYTES = 24 * 1024 * 1024  # 25MB制限に対して余裕を持って24MBに設定
+    MAX_BYTES = 24 * 1024 * 1024
 
     file_size = wav_path.stat().st_size
     print(f"[transcriber] ファイルサイズ: {file_size / 1024 / 1024:.1f}MB")
 
     if file_size <= MAX_BYTES:
-        # 25MB以下はそのまま送信
         return _send_to_whisper(client, wav_path)
 
-    # 25MB超の場合は時間ベースで分割して送信
     print(f"[transcriber] ファイルが大きいため分割して送信します")
-    chunks     = _split_wav(wav_path, MAX_BYTES)
+    chunks      = _split_wav(wav_path, MAX_BYTES)
     transcripts = []
 
     for i, chunk_path in enumerate(chunks):
         print(f"[transcriber] チャンク {i+1}/{len(chunks)} を送信中...")
         text = _send_to_whisper(client, chunk_path)
         transcripts.append(text)
-        chunk_path.unlink()  # 一時チャンクを削除
+        chunk_path.unlink()
 
     return " ".join(transcripts)
 
 
-def _send_to_whisper(client: Groq, wav_path: Path) -> str:
+def _send_to_whisper(client, wav_path: Path) -> str:
     """単一ファイルをWhisperに送信する（リトライ付き）"""
     for attempt in range(1, RETRY_COUNT + 1):
         try:
@@ -148,7 +243,7 @@ def _send_to_whisper(client: Groq, wav_path: Path) -> str:
                 raise
 
 
-def _split_wav(wav_path: Path, max_bytes: int) -> list[Path]:
+def _split_wav(wav_path: Path, max_bytes: int) -> list:
     """WAVファイルをmax_bytes以下のチャンクに分割して一時ファイルとして保存する"""
     import wave as wave_module
     import math
@@ -183,9 +278,7 @@ def _split_wav(wav_path: Path, max_bytes: int) -> list[Path]:
     return chunk_paths
 
 
-# ── LLaMA 要約（リトライ付き） ────────────────────
-
-
+# ── Groq LLaMA 要約（旧groqモード用・後方互換） ──────
 def _call_llama_prompt(client, prompt: str) -> str:
     """Groq LLaMAにプロンプトを直接渡して結果を返す"""
     for attempt in range(1, RETRY_COUNT + 1):
@@ -204,9 +297,10 @@ def _call_llama_prompt(client, prompt: str) -> str:
                 raise
     return ""
 
+
 def _clean_transcript_groq(client, raw_transcript: str) -> str:
     """
-    Groq LLaMAを使って文字起こしから不要文字列を除去する（個人用モード）。
+    Groq LLaMAを使って文字起こしから不要文字列を除去する（groqモード用）。
     """
     prompt = (
         "以下は会議の音声を文字起こしした生テキストです。\n"
@@ -232,43 +326,15 @@ def _clean_transcript_groq(client, raw_transcript: str) -> str:
         print(f"[transcriber] Groq クリーニングエラー（元テキストを使用）: {e}")
         return raw_transcript
 
-def _call_llama(client: Groq, transcript: str) -> str:
-    prompt = (
-        "以下の文字起こし内容を要約してください。\n\n"
-        f"【文字起こし】\n{transcript}\n\n"
-        "【要約の形式】\n"
-        "・重要なポイントを3〜5つの箇条書きでまとめてください。\n"
-        "・各ポイントは簡潔に1〜2文で記述してください。\n"
-        "・要約のみを出力してください（説明文は不要です）。"
-    )
 
-    for attempt in range(1, RETRY_COUNT + 1):
-        try:
-            response = client.chat.completions.create(
-                model=SUMMARY_MODEL,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-            )
-            return response.choices[0].message.content.strip()
-        except Exception as e:
-            if "429" in str(e) and attempt < RETRY_COUNT:
-                print(f"[transcriber] 429 レート制限 - {RETRY_WAIT}秒後にリトライ ({attempt}/{RETRY_COUNT})")
-                time.sleep(RETRY_WAIT)
-            else:
-                raise
+# ── faster-whisper（Ollamaモード） ───────────────────
 
-
-# ── faster-whisper（ビジネス用） ───────────────────
-
-# モデルキャッシュ（再利用してメモリ節約）
 _whisper_model      = None
 _whisper_model_name = None
-
 FASTER_WHISPER_MODEL = "medium"
-
-# モデルダウンロード状態管理
-_model_status = "idle"   # idle / downloading / ready / error
+_model_status = "idle"
 _model_error  = ""
+
 
 def get_model_status() -> dict:
     """モデルのダウンロード・ロード状態を返す"""
@@ -278,19 +344,21 @@ def get_model_status() -> dict:
         "model":  FASTER_WHISPER_MODEL,
     }
 
+
 def preload_model():
     """
     バックグラウンドスレッドでモデルをプリロードする。
-    設定画面でビジネス用モードを選択した時点で呼び出す。
+    設定画面でOllamaモードを選択した時点で呼び出す。
     """
     import threading
     t = threading.Thread(target=_preload_model_thread, daemon=True)
     t.start()
 
+
 def _preload_model_thread():
     global _model_status, _model_error
     if _model_status in ("loading", "ready"):
-        return  # すでに進行中またはロード済み
+        return
     try:
         _model_status = "loading"
         print("[transcriber] バックグラウンドでモデルをプリロード中...")
@@ -315,48 +383,41 @@ def _get_whisper_model():
 
     from faster_whisper import WhisperModel
 
-    # GPU(CUDA)が使えるか確認
     try:
         import torch
         if torch.cuda.is_available():
-            device    = "cuda"
-            compute   = "float16"
+            device  = "cuda"
+            compute = "float16"
             print(f"[transcriber] GPU検出: {torch.cuda.get_device_name(0)}")
         else:
-            device    = "cpu"
-            compute   = "int8"
+            device  = "cpu"
+            compute = "int8"
             print("[transcriber] GPUなし: CPUで実行します（処理に時間がかかる場合があります）")
     except ImportError:
-        device    = "cpu"
-        compute   = "int8"
+        device  = "cpu"
+        compute = "int8"
         print("[transcriber] torch未インストール: CPUで実行します")
 
-    # キャッシュの有無を確認してメッセージを出し分け
     import os
-    cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
+    cache_dir    = Path.home() / ".cache" / "huggingface" / "hub"
     model_cached = any(
         FASTER_WHISPER_MODEL.replace(".", "-") in str(p)
         for p in cache_dir.glob("**/config.json")
     ) if cache_dir.exists() else False
 
-    if model_cached:
-        print(f"[transcriber] Whisperモデルをロード中: {FASTER_WHISPER_MODEL} ({device})")
-    else:
-        print(f"[transcriber] Whisperモデルをロード中: {FASTER_WHISPER_MODEL} ({device})")
+    if not model_cached:
         print("[transcriber] 初回のみ：モデルのダウンロードが発生します（約1.5GB）")
 
+    print(f"[transcriber] Whisperモデルをロード中: {FASTER_WHISPER_MODEL} ({device})")
     _whisper_model      = WhisperModel(FASTER_WHISPER_MODEL, device=device, compute_type=compute)
     _whisper_model_name = FASTER_WHISPER_MODEL
-
     print(f"[transcriber] Whisperモデルのロード完了")
     return _whisper_model
 
 
-
 def _get_ollama_model() -> str:
-    """使用するOllamaモデルを.envから取得（未設定時はllama3.1:8b）"""
-    return _read_env().get("OLLAMA_MODEL", "llama3.1:8b")
-
+    """使用するOllamaモデルを.envから取得（未設定時はgemma3:27b）"""
+    return _read_env().get("OLLAMA_MODEL", "gemma3:27b")
 
 
 def _chunk_text(text: str, max_chars: int = 3000) -> list:
@@ -374,8 +435,9 @@ def _chunk_text(text: str, max_chars: int = 3000) -> list:
         chunks.append(current.strip())
     return chunks
 
+
 def _clean_transcript_ollama(raw_transcript: str, abort_event=None, progress_cb=None) -> str:
-    """長文対応：チャンク分割してクリーニング"""
+    """長文対応：チャンク分割してOllamaでクリーニング（Ollamaモード専用）"""
     import urllib.request, json
 
     if abort_event and abort_event.is_set():
@@ -419,8 +481,9 @@ def _clean_transcript_ollama(raw_transcript: str, abort_event=None, progress_cb=
     print(f"[transcriber] クリーニング完了: {len(raw_transcript)}字 → {len(result)}字")
     return result
 
+
 def _summarize_ollama(transcript: str, extra_prompt: str = "", abort_event=None, progress_cb=None) -> str:
-    """長文対応：チャンクごとに要約してから統合要約"""
+    """長文対応：チャンクごとに要約してから統合要約（Ollamaモード専用）"""
     import urllib.request, json
 
     if abort_event and abort_event.is_set():
@@ -428,11 +491,9 @@ def _summarize_ollama(transcript: str, extra_prompt: str = "", abort_event=None,
 
     chunks = _chunk_text(transcript, max_chars=3000)
 
-    # チャンクが1つなら直接要約
     if len(chunks) == 1:
         partial_summaries = [transcript]
     else:
-        # 各チャンクを部分要約
         partial_summaries = []
         for i, chunk in enumerate(chunks):
             if abort_event and abort_event.is_set():
@@ -462,11 +523,10 @@ def _summarize_ollama(transcript: str, extra_prompt: str = "", abort_event=None,
                 print(f"[transcriber] 部分要約エラー: {e}")
                 partial_summaries.append(chunk[:500])
 
-    # 統合要約
     if progress_cb:
         progress_cb(0, 0, final=True)
     print("[transcriber] 統合要約開始...")
-    combined = "\n\n".join(partial_summaries)
+    combined    = "\n\n".join(partial_summaries)
     final_prompt = (
         "あなたは経験豊富な議事録作成の専門家です。\n"
         "以下は会議の内容をまとめたテキストです。\n\n"
@@ -489,13 +549,14 @@ def _summarize_ollama(transcript: str, extra_prompt: str = "", abort_event=None,
         headers={"Content-Type": "application/json"}, method="POST",
     )
     with urllib.request.urlopen(req, timeout=None) as conn:
-        data = json.loads(conn.read().decode("utf-8"))
+        data   = json.loads(conn.read().decode("utf-8"))
         result = data.get("response", "").strip()
     print(f"[transcriber] 要約完了: {len(result)}字")
     return result
 
+
 def _transcribe_faster_whisper(wav_filename: str, extra_prompt: str = "", record_id: int = None, abort_event=None, progress_callback=None) -> dict:
-    """faster-whisper + Ollama によるローカル処理"""
+    """faster-whisper + Ollama によるローカル処理（Ollamaモード専用）"""
 
     def _cb(step, message, progress):
         if progress_callback:
@@ -510,7 +571,6 @@ def _transcribe_faster_whisper(wav_filename: str, extra_prompt: str = "", record
 
         # ── ① 文字起こし ──────────────────────────
         print(f"[transcriber] faster-whisper 文字起こし開始: {wav_filename}")
-        # 文字起こし精度向上のための事前情報プロンプト
         initial_prompt = (
             "これは会議・打ち合わせの録音です。"
             "複数の参加者による質疑応答、意見交換、議論が含まれています。"
@@ -537,7 +597,7 @@ def _transcribe_faster_whisper(wav_filename: str, extra_prompt: str = "", record
         if abort_event and abort_event.is_set():
             return {"status": "error", "message": "処理が中断されました"}
 
-        # ── ② 不要文字列除去（Ollama） ────────────
+        # ── ② クリーニング（Ollama）────────────────
         chunks_count = max(1, len(transcript) // 3000 + 1)
         _cb("cleaning", f"🧹 クリーニング中…（約{chunks_count}ブロック）", 40)
         print("[transcriber] Ollama で不要文字列除去開始")
@@ -559,7 +619,7 @@ def _transcribe_faster_whisper(wav_filename: str, extra_prompt: str = "", record
                 print(f"[transcriber] クリーニング保存エラー: {e}")
         transcript = cleaned
 
-        # ── ③ 要約（Ollama ローカル） ─────────────
+        # ── ③ 要約（Ollama）──────────────────────
         sum_chunks = max(1, len(transcript) // 3000 + 1)
         _cb("summarizing", f"✨ 要約中…（約{sum_chunks}ブロック）", 65)
         print("[transcriber] Ollama で要約開始（完全ローカル処理）")

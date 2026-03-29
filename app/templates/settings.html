@@ -15,6 +15,85 @@
     .debug-slider:before { content:""; position:absolute; width:18px; height:18px; left:3px; bottom:3px; background:#888; border-radius:50%; transition:.3s; }
     .debug-toggle input:checked + .debug-slider { background:rgba(29,158,117,0.3); border:1px solid #1D9E75; }
     .debug-toggle input:checked + .debug-slider:before { transform:translateX(20px); background:#1D9E75; }
+
+    /* ── クラウド／ローカル 切替スイッチ ── */
+    .llm-type-switch { display:flex; gap:10px; }
+    .llm-type-btn {
+      flex:1; display:flex; flex-direction:column; align-items:center; gap:4px;
+      padding:14px 12px; border-radius:12px; border:2px solid var(--border);
+      background:var(--bg); color:#e0e0e0; cursor:pointer; font-family:inherit;
+      font-size:15px; font-weight:700; transition:all .2s;
+    }
+    .llm-type-btn:hover { border-color:#7C6AF7; }
+    .llm-type-btn.active { border-color:#7C6AF7; background:rgba(124,106,247,0.12); color:#fff; }
+    .llm-type-desc { font-size:11px; font-weight:400; color:var(--muted); }
+    .llm-type-btn.active .llm-type-desc { color:#b0a8f0; }
+
+    /* ── AIモード枠：完全固定高さ ── */
+    #aiModeCard {
+      height: 590px;        /* 最大パターン（クラウド固有APIキーあり）に合わせた固定値 */
+      overflow-y: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    #llmDropdownArea { margin-top:14px; }
+    #llmSpecArea     { margin-top:12px; }
+
+    /* ── カスタムドロップダウン ── */
+    .custom-select { position:relative; user-select:none; }
+    .custom-select-trigger {
+      display:flex; align-items:center; gap:10px;
+      padding:10px 14px; border-radius:10px;
+      border:1.5px solid var(--border); background:var(--bg);
+      cursor:pointer; font-size:14px; color:#e0e0e0;
+      transition:border-color .2s;
+    }
+    .custom-select-trigger:hover { border-color:#7C6AF7; }
+    .custom-select-trigger.open { border-color:#7C6AF7; }
+    .custom-select-trigger .cst-arrow {
+      margin-left:auto; font-size:11px; color:var(--muted); transition:transform .2s;
+    }
+    .custom-select-trigger.open .cst-arrow { transform:rotate(180deg); }
+    .custom-select-icon { font-size:20px; width:28px; text-align:center; flex-shrink:0; }
+    .custom-select-label { flex:1; }
+    .custom-select-name { font-weight:700; font-size:14px; }
+    .custom-select-sub  { font-size:11px; color:var(--muted); margin-top:1px; }
+
+    .custom-select-options {
+      position:absolute; top:calc(100% + 6px); left:0; right:0; z-index:999;
+      background:#1e1e2e; border:1.5px solid #7C6AF7;
+      border-radius:10px; overflow:hidden;
+      box-shadow:0 8px 32px rgba(0,0,0,.5);
+      display:none;
+    }
+    .custom-select-options.open { display:block; }
+    .custom-select-option {
+      display:flex; align-items:center; gap:10px;
+      padding:10px 14px; cursor:pointer; transition:background .15s;
+      border-bottom:1px solid rgba(255,255,255,.05);
+    }
+    .custom-select-option:last-child { border-bottom:none; }
+    .custom-select-option:hover { background:rgba(124,106,247,0.15); }
+    .custom-select-option.selected { background:rgba(124,106,247,0.2); }
+    .cso-icon { font-size:20px; width:28px; text-align:center; flex-shrink:0; }
+    .cso-body { flex:1; }
+    .cso-name { font-size:13px; font-weight:700; color:#e0e0e0; }
+    .cso-sub  { font-size:11px; color:var(--muted); margin-top:1px; }
+    .cso-check { font-size:14px; color:#7C6AF7; margin-left:auto; }
+
+    /* ── スペック説明 ── */
+    .llm-spec-box {
+      background:var(--bg); border:1px solid var(--border);
+      border-radius:10px; padding:12px 14px;
+      display:flex; flex-direction:column; gap:6px;
+    }
+    .mode-spec-row { display:flex; align-items:baseline; gap:8px; font-size:12px; line-height:1.5; }
+    .mode-spec-label { color:var(--muted); min-width:36px; flex-shrink:0; }
+    .mode-spec-value  { color:#c0c0c0; }
+
+    /* ── APIキー入力エリア ── */
+    .api-key-inline-section { margin-bottom:12px; }
+    .api-key-inline-label { font-size:12px; color:var(--muted); margin-bottom:6px; font-weight:600; }
   </style>
 </head>
 <body>
@@ -42,75 +121,123 @@
   <!-- AIモード設定 -->
   <div class="settings-section">
     <div class="settings-section-title">🤖 AIモード</div>
-    <div class="settings-card">
-      <div class="mode-cards">
-        <div class="mode-card" id="card-personal" onclick="selectMode('personal')">
-          <div class="mode-card-check">✓</div>
-          <div class="mode-card-icon">👤</div>
-          <div class="mode-card-name">個人用</div>
-          <div class="mode-card-engine">Groq API</div>
-          <div class="mode-card-desc">クラウド処理。高速・高精度。個人利用に最適。</div>
+    <div class="settings-card" id="aiModeCard">
+
+      <!-- ① クラウド／ローカル 切替スイッチ -->
+      <div class="llm-type-switch">
+        <button class="llm-type-btn" id="typeBtn-cloud" onclick="selectLlmType('cloud')">
+          ☁️ クラウド
+          <span class="llm-type-desc">高速・高精度を優先</span>
+        </button>
+        <button class="llm-type-btn" id="typeBtn-local" onclick="selectLlmType('local')">
+          🏠 ローカル
+          <span class="llm-type-desc">機密性を優先</span>
+        </button>
+      </div>
+
+      <!-- ② サービス選択ドロップダウン（カスタム） -->
+      <div id="llmDropdownArea" style="display:none;">
+        <div class="custom-select" id="customProviderSelect">
+          <div class="custom-select-trigger" id="cstTrigger" onclick="toggleCustomSelect()">
+            <span class="custom-select-icon" id="cstIcon">🏠</span>
+            <span class="custom-select-label">
+              <div class="custom-select-name" id="cstName">Ollama（完全ローカル）</div>
+            </span>
+            <span class="cst-arrow">▼</span>
+          </div>
+          <div class="custom-select-options" id="cstOptions"></div>
         </div>
-        <div class="mode-card" id="card-business" onclick="selectMode('business')">
-          <div class="mode-card-check">✓</div>
-          <div class="mode-card-icon">🏢</div>
-          <div class="mode-card-name">ビジネス用</div>
-          <div class="mode-card-engine">faster-whisper</div>
-          <div class="mode-card-desc">完全ローカル処理。機密会議・社内情報に最適。</div>
+      </div>
+
+      <!-- ③ 選択したプロバイダーのスペック説明 -->
+      <div id="llmSpecArea" style="margin-top:14px;display:none;">
+        <div id="llmSpecContent"></div>
+      </div>
+
+      <!-- ④ APIキー入力エリア（クラウド選択時のみ） -->
+      <div id="apiKeyInlineArea" style="margin-top:16px;display:none;">
+
+        <!-- 選択API固有キー -->
+        <div class="api-key-inline-section" id="apiInlineSection-openai" style="display:none;">
+          <div class="api-key-inline-label">🔑 OpenAI APIキー</div>
+          <div class="api-key-row">
+            <input class="api-key-input" id="apiKeyOpenai" type="password" placeholder="sk-..." />
+            <button class="api-key-toggle" onclick="toggleApiKeyVisibility('apiKeyOpenai', this)">表示</button>
+          </div>
+          <p style="font-size:11px;color:var(--muted);margin-top:4px;">クリーニング・要約・相談・照会・保管庫整形に使用します</p>
+          <p style="font-size:11px;color:var(--muted);margin-top:2px;">
+            <a href="https://platform.openai.com/api-keys" target="_blank" style="color:#7C6AF7;text-decoration:none;">OpenAI Platform で取得 →</a>
+          </p>
         </div>
+
+        <div class="api-key-inline-section" id="apiInlineSection-gemini" style="display:none;">
+          <div class="api-key-inline-label">🔑 Gemini APIキー</div>
+          <div class="api-key-row">
+            <input class="api-key-input" id="apiKeyGemini" type="password" placeholder="AIza..." />
+            <button class="api-key-toggle" onclick="toggleApiKeyVisibility('apiKeyGemini', this)">表示</button>
+          </div>
+          <p style="font-size:11px;color:var(--muted);margin-top:4px;">クリーニング・要約・相談・照会・保管庫整形に使用します</p>
+          <p style="font-size:11px;color:var(--muted);margin-top:2px;">
+            <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:#7C6AF7;text-decoration:none;">Google AI Studio で取得 →</a>
+          </p>
+        </div>
+
+        <div class="api-key-inline-section" id="apiInlineSection-claude" style="display:none;">
+          <div class="api-key-inline-label">🔑 Anthropic APIキー</div>
+          <div class="api-key-row">
+            <input class="api-key-input" id="apiKeyClaude" type="password" placeholder="sk-ant-..." />
+            <button class="api-key-toggle" onclick="toggleApiKeyVisibility('apiKeyClaude', this)">表示</button>
+          </div>
+          <p style="font-size:11px;color:var(--muted);margin-top:4px;">クリーニング・要約・相談・照会・保管庫整形に使用します</p>
+          <p style="font-size:11px;color:var(--muted);margin-top:2px;">
+            <a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:#7C6AF7;text-decoration:none;">Anthropic Console で取得 →</a>
+          </p>
+        </div>
+
+        <!-- Groq APIキー（クラウドモード共通） -->
+        <div class="api-key-inline-section" id="apiInlineGroq">
+          <div class="api-key-inline-label">🔑 Groq APIキー</div>
+          <div class="api-key-row">
+            <input class="api-key-input" id="apiKeyGroq" type="password" placeholder="gsk_..." />
+            <button class="api-key-toggle" onclick="toggleApiKeyVisibility('apiKeyGroq', this)">表示</button>
+          </div>
+          <p style="font-size:11px;color:var(--muted);margin-top:4px;" id="groqKeyDesc">
+            文字起こしに使用します（クラウドモード共通）
+          </p>
+          <p style="font-size:11px;color:var(--muted);margin-top:2px;">
+            <a href="https://console.groq.com/keys" target="_blank" style="color:#7C6AF7;text-decoration:none;">Groq Console で取得 →</a>
+          </p>
+        </div>
+
+      </div><!-- /apiKeyInlineArea -->
+
+      <!-- Ollama注釈（ローカル選択時） -->
+      <div class="business-notice" id="businessNotice" style="margin-top:14px;"></div>
+
+      <!-- Ollamaモデル設定（ローカル選択時のみ表示） -->
+      <div id="ollamaModelInline" style="display:none;margin-top:14px;">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:8px;line-height:1.6;">
+          要約に使用するモデルを選択してください。モデルが大きいほど精度が上がりますが処理時間が増えます。<br>
+          モデルは事前に <code style="color:#9CA3AF;">ollama pull モデル名</code> でダウンロードが必要です。
+        </div>
+        <select class="api-key-input" id="ollamaModelSelect" style="cursor:pointer;">
+          <option value="llama3.1:8b">llama3.1:8b（約5GB・標準）</option>
+          <option value="gemma3:27b">gemma3:27b（約17GB・高品質・日本語得意）</option>
+          <option value="llama3.3:70b">llama3.3:70b（約40GB・最高品質 ※要ダウンロード）</option>
+        </select>
+        <p style="font-size:11px;color:var(--muted);margin-top:4px;">
+          ⚠️ 選択したモデルが未ダウンロードの場合はエラーになります。変更後は「設定を保存」してください。
+        </p>
       </div>
 
-      <!-- ビジネス用注釈 -->
-      <div class="business-notice" id="businessNotice">
-        ⚠️ <strong>faster-whisper の動作要件</strong><br>
-        GPU（VRAM 8GB以上）を推奨します。GPUがない場合もCPUで動作しますが、
-        処理に数分かかる場合があります。初回起動時にモデルファイル（約3GB）を
-        自動ダウンロードします。
-      </div>
     </div>
   </div>
 
-  <!-- Ollamaモデル設定 -->
-  <div class="settings-section" id="ollamaSection" style="display:none;">
-    <div class="settings-section-title">🤖 Ollama モデル設定</div>
-    <div class="settings-card">
-      <p style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.6;">
-        要約に使用するモデルを選択してください。モデルが大きいほど精度が上がりますが処理時間が増えます。<br>
-        モデルは事前に <code style="color:#9CA3AF;">ollama pull モデル名</code> でダウンロードが必要です。
-      </p>
-      <select class="api-key-input" id="ollamaModelSelect" style="cursor:pointer;">
-        <option value="llama3.1:8b">llama3.1:8b（約5GB・標準）</option>
-        <option value="gemma3:27b">gemma3:27b（約17GB・高品質・日本語得意）</option>
-        <option value="llama3.3:70b">llama3.3:70b（約40GB・最高品質 ※要ダウンロード）</option>
-      </select>
-      <p style="font-size:11px;color:var(--muted);margin-top:4px;">
-        ⚠️ 選択したモデルが未ダウンロードの場合はエラーになります。<br>
-        事前に <code style="color:#9CA3AF;">ollama pull モデル名</code> でダウンロードしてください。
-      </p>
-      <p style="font-size:11px;color:var(--muted);margin-top:8px;">
-        ⚠️ 変更後は「設定を保存」してください。
-      </p>
-    </div>
-  </div>
 
-  <!-- Groq API設定 -->
-  <div class="settings-section" id="groqSection">
-    <div class="settings-section-title">🔑 Groq API 接続情報</div>
-    <div class="settings-card">
-      <div class="api-key-row">
-        <input class="api-key-input" id="apiKeyInput" type="password" placeholder="gsk_..." />
-        <button class="api-key-toggle" onclick="toggleApiKeyVisibility()">表示</button>
-      </div>
-      <p style="font-size:11px;color:var(--muted);padding-bottom:12px;line-height:1.6;">
-        APIキーは <code style="color:#9CA3AF;">.env</code> ファイルに保存されます。
-        GitHubには一切アップロードされません。
-        <a href="https://console.groq.com/keys" target="_blank"
-          style="color:#7C6AF7;text-decoration:none;">
-          Groq Console で取得 →
-        </a>
-      </p>
-    </div>
-  </div>
+
+
+
+
 
 
   <!-- 録音ソース設定 -->
@@ -247,10 +374,61 @@
     </div>
   </div>
 
-  <!-- ペルソナ管理 -->
+  <!-- ペルソナ管理（グループ管理を上部に含む） -->
   <div class="settings-section" style="margin-top: 40px;">
     <div class="settings-section-title">🎭 ペルソナ管理</div>
     <div class="settings-card" style="padding: 20px;">
+
+      <!-- グループ管理エリア -->
+      <div style="margin-bottom:20px;padding-bottom:20px;border-bottom:1px solid var(--border);">
+        <div style="font-size:13px;font-weight:700;color:#e0e0e0;margin-bottom:10px;">👥 グループ管理</div>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.6;">
+          グループを作成してペルソナをまとめられます。相談室でグループを選択すると、メンバーが一括入室します。
+        </p>
+        <div id="groupList" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;"></div>
+        <button onclick="openGroupModal(null)"
+          style="width:100%;padding:10px;border-radius:8px;border:2px dashed var(--border);
+                 background:transparent;color:var(--muted);cursor:pointer;font-size:13px;
+                 font-family:inherit;transition:all .2s;"
+          onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'"
+          onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">
+          ＋ 新しいグループを追加
+        </button>
+      </div>
+
+      <!-- グループ編集モーダル -->
+      <div id="groupModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);
+           z-index:9999;align-items:center;justify-content:center;backdrop-filter:blur(4px);">
+        <div style="background:#1e1e2e;border:1px solid #444;border-radius:16px;padding:28px;
+                    width:90%;max-width:520px;box-shadow:0 24px 80px rgba(0,0,0,.8);color:#e0e0e0;">
+          <div style="font-size:16px;font-weight:700;margin-bottom:16px;" id="groupModalTitle">グループを追加</div>
+          <div style="margin-bottom:14px;">
+            <label style="font-size:11px;color:#aaa;display:block;margin-bottom:4px;">グループ名 *</label>
+            <input id="gName" type="text" placeholder="例：営業チーム" maxlength="20"
+              style="width:100%;padding:8px 12px;font-size:13px;background:#2a2a3e;border:1px solid #555;
+                     border-radius:8px;color:#e0e0e0;font-family:inherit;box-sizing:border-box;outline:none;"/>
+          </div>
+          <div style="margin-bottom:16px;">
+            <label style="font-size:11px;color:#aaa;display:block;margin-bottom:8px;">メンバー（最大14名）</label>
+            <div id="gMemberList" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+            <div style="font-size:10px;color:var(--muted);margin-top:6px;" id="gMemberCount"></div>
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;">
+            <button onclick="closeGroupModal()"
+              style="padding:8px 20px;border-radius:8px;border:1px solid #555;
+                     background:#2a2a3e;color:#ccc;cursor:pointer;font-family:inherit;font-size:13px;">
+              キャンセル
+            </button>
+            <button onclick="saveGroup()"
+              style="padding:8px 20px;border-radius:8px;border:none;
+                     background:#7C6AF7;color:#fff;cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;">
+              💾 保存
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ペルソナ一覧 -->
       <p style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.6;">
         相談室に参加させるペルソナを自由に追加・編集・削除できます。<br>
         OFFにしたペルソナは相談室でデフォルト退出状態になります。
@@ -331,9 +509,16 @@
                  box-sizing:border-box;outline:none;"></textarea>
         <div style="font-size:10px;color:#888;margin-top:4px;">このテキストがAIへの指示になります。どんな専門家として回答させたいか自由に書いてください。</div>
       </div>
-      <div style="margin-bottom:20px;display:flex;align-items:center;gap:8px;">
+      <div style="margin-bottom:12px;display:flex;align-items:center;gap:8px;">
         <input type="checkbox" id="pEnabled" checked style="width:16px;height:16px;cursor:pointer;accent-color:#7C6AF7;"/>
         <label for="pEnabled" style="font-size:13px;cursor:pointer;color:#e0e0e0;">相談室でON（有効）</label>
+      </div>
+      <div style="margin-bottom:20px;">
+        <label style="font-size:11px;color:#aaa;display:block;margin-bottom:4px;">所属グループ</label>
+        <select id="pGroup" style="width:100%;padding:8px 12px;font-size:13px;background:#2a2a3e;border:1px solid #555;
+                 border-radius:8px;color:#e0e0e0;font-family:inherit;box-sizing:border-box;outline:none;cursor:pointer;">
+        </select>
+        <div style="font-size:10px;color:var(--muted);margin-top:4px;">変更すると以前のグループから自動で外れます</div>
       </div>
 
       <div style="display:flex;gap:8px;justify-content:flex-end;">
