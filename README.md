@@ -1,256 +1,249 @@
 # COVE by AURA
 
-> 完全ローカル・完全秘匿の AI 意思決定支援ツール
+**役職者向け ローカルAI意思決定支援ツール**
 
-[![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/)
-[![Flask](https://img.shields.io/badge/Flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Ollama](https://img.shields.io/badge/Ollama-required-orange.svg)](https://ollama.com/)
-[![License](https://img.shields.io/badge/License-Private-red.svg)]()
+すべての処理がPC上で完結するため、機密性の高い情報を外部に送信することなく利用できます。
 
 ---
 
-## 概要
+## 主な機能
 
-COVE は、経営者・管理職向けの **完全ローカル動作** する AI 意思決定支援ツールです。  
-録音・文字起こし・保管庫・複数ペルソナによる多角的相談を、インターネット接続なしで完結させます。
-
-**秘匿性が最大の特徴です。** 会議録音・経営判断・個人情報は一切クラウドに送信されません。
-
-### 主な機能
-
-| 機能 | 説明 |
+| 画面 | 機能 |
 |---|---|
-| 🎙️ **録音** | マイク・システム音声の録音、文字起こし、AI 要約 |
-| 🗄️ **保管庫** | テキストメモ・ファイル・Web データ・録音データを一元管理 |
-| 💬 **相談室** | 8 種のペルソナが多角的な視点で意思決定を支援 |
-| ⚙️ **設定** | ペルソナ・カテゴリ・AI モデルのカスタマイズ |
+| 🎙️ **録音** | 会議・打ち合わせを録音し、AIが自動で文字起こし・クリーニング・要約 |
+| 🗄️ **保管庫** | テキストメモ・ファイル・Webデータ・録音データをカテゴリで一元管理 |
+| 🔍 **照会室** | アーカイバーが保管データから必要な情報を抽出・整理（会話継続対応） |
+| 💬 **相談室** | 8人のAIペルソナが多角的な視点から意見を提示（連続相談対応） |
+| ⚙️ **設定** | ペルソナのカスタマイズ・カテゴリ管理 |
 
 ---
 
-## 動作環境
+## システム要件
 
-| 項目 | 要件 |
-|---|---|
-| OS | Windows 10/11、macOS 13 (Ventura) 以降 |
-| Python | 3.12 以上 |
-| RAM | 16GB 以上推奨（gemma3:27b 使用時は 24GB 以上） |
-| VRAM / 統合メモリ | 8GB 以上（16GB 以上推奨） |
-| ストレージ | 30GB 以上の空き容量（モデルファイル含む） |
+### Windows
+| 項目 | 最小要件 | 推奨 |
+|---|---|---|
+| OS | Windows 10 64bit | Windows 11 |
+| RAM | 16GB | 32GB以上 |
+| VRAM | 8GB | 16GB以上（NVIDIA GPU） |
+| ストレージ | 30GB以上 | 50GB以上 |
+
+### Mac
+| 項目 | 最小要件 | 推奨 |
+|---|---|---|
+| チップ | Apple Silicon（M1以降） | M5 Pro以降 |
+| RAM | 16GB | 36GB以上 |
+| ストレージ | 30GB以上 | 50GB以上 |
+| OS | macOS 13 Ventura以降 | 最新版 |
 
 ---
 
 ## セットアップ
 
-### 1. 必要なツールのインストール
+### 1. uv のインストール
 
-#### Python / uv
+**Windows（PowerShell）**
+```powershell
+winget install --id=astral-sh.uv -e
+```
 
+**Mac（Terminal）**
 ```bash
-# uv のインストール（Windows）
-powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
-
-# uv のインストール（Mac）
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-#### Ollama
+### 2. Ollama のインストール
 
-[https://ollama.com/download](https://ollama.com/download) からインストーラーをダウンロードして実行してください。
+**Windows**：https://ollama.com/download からインストーラーをダウンロード
 
-#### ffmpeg
+**Mac**
+```bash
+brew install ollama
+```
+
+### 3. AIモデルのダウンロード（約17GB）
 
 ```bash
-# Windows（winget）
-winget install ffmpeg
+ollama pull gemma3:27b
+```
 
-# Mac（Homebrew）
+> ダウンロードには30分〜2時間程度かかります。完了するまでウィンドウを閉じないでください。
+
+### 4. ffmpeg のインストール（トリミング機能用・任意）
+
+**Windows**
+```powershell
+winget install ffmpeg
+```
+
+**Mac**
+```bash
 brew install ffmpeg
 ```
 
----
-
-### 2. リポジトリのクローン
+### 5. COVE のセットアップ
 
 ```bash
-git clone https://github.com/workntones-cyber/cove-by-aura.git
 cd cove-by-aura
-```
-
----
-
-### 3. AI モデルのダウンロード
-
-```bash
-# 推奨モデル（約17GB・ダウンロードに30分〜1時間程度）
-ollama pull gemma3:27b
-
-# VRAM が 8GB の場合はこちら
-ollama pull gemma3:12b
-```
-
----
-
-### 4. 依存パッケージのインストール
-
-```bash
 uv sync
 ```
 
 ---
 
-### 5. 起動
+## 起動・終了
 
+**起動**
 ```bash
 uv run python main.py
 ```
 
-ブラウザで [http://127.0.0.1:5001](http://127.0.0.1:5001) にアクセスしてください。  
-起動後、設定画面で **AI モード → ビジネス用** を選択してください。
+起動後、ブラウザが自動で開きます。開かない場合は http://127.0.0.1:5001 にアクセスしてください。
+
+**終了**：画面右上の「⏻ 終了」ボタンをクリック
+
+> ⚠️ ブラウザのタブを閉じるだけではCOVEは終了しません。
 
 ---
 
-## ディレクトリ構成
+## ナビゲーション構成
+
+```
+🎙️ 録音  |  🗄️ 保管庫  |  🔍 照会室  |  💬 相談室  |  ⚙️ 設定  |  ❓
+```
+
+---
+
+## ペルソナ一覧
+
+### 相談室（8ペルソナ）
+| ペルソナ | 視点 | 得意なこと |
+|---|---|---|
+| ▶ 戦略家 | 攻撃的・勝ちにいく | 勝ち筋・具体的な行動方針 |
+| ⚠ リスク管理者 | 保守的・問題指摘 | 落とし穴の発見・最悪シナリオ |
+| 📊 アナリスト | データ・客観的分析 | 構造的判定・根拠の整理 |
+| 💡 クリエイター | 発想力・斬新アイデア | 誰もやっていないアイデア |
+| ⚖ 法務・コンプラ | 規則・法的観点 | 法的リスク・適法な代替案 |
+| 👤 ユーザー視点 | 現場・顧客目線 | 第一印象・離脱ポイント |
+| 🔥 クレーマー | 批判・欠点指摘 | 致命的欠陥・矛盾の発見 |
+| 📣 マーケッター | 市場・ブランド戦略 | 売れる/売れない判定・差別化 |
+
+### 照会室専用
+| ペルソナ | 役割 |
+|---|---|
+| 🗂 アーカイバー | 保管データから事実・記録のみを抽出・整理。意見は言わず、矛盾・見落とし発見時のみ一言添える |
+
+---
+
+## ファイル構成
 
 ```
 cove-by-aura/
-├── main.py                         # Flask アプリ・全 API エンドポイント
+├── main.py                    Flask（全APIエンドポイント）
+├── pyproject.toml             依存パッケージ定義
+├── uv.lock                    依存関係ロックファイル
+├── cove.spec                  PyInstallerビルド設定
+├── cove.ico                   アプリアイコン（Windows）
+├── cove.iconset/              アプリアイコン素材（Mac .icns 変換用）
+├── .env                       環境変数（APIキー等）※gitignore
+├── env.example                .env テンプレート
 ├── app/
-│   ├── database.py                 # DB スキーマ・CRUD 関数
-│   ├── cove.db                     # SQLite データベース（自動生成）
-│   ├── services/
-│   │   ├── transcriber.py          # 文字起こし・クリーニング・要約
-│   │   └── recorder.py             # 録音デバイス管理
-│   ├── templates/
-│   │   ├── index.html              # 録音画面
-│   │   ├── vault.html              # 保管庫
-│   │   ├── council.html            # 相談室
-│   │   └── settings.html          # 設定画面
-│   └── static/
-│       ├── css/style.css
-│       ├── js/
-│       │   ├── recorder.js
-│       │   └── settings.js
-│       └── img/personas/           # ペルソナアイコン画像
-├── uploads/                        # 録音 WAV ファイル（自動生成）
-├── .env                            # 環境設定（自動生成）
-└── README.md
+│   ├── database.py            SQLite操作・スキーマ定義
+│   ├── cove.db                データベース ※gitignore
+│   └── services/
+│       ├── transcriber.py     文字起こし・クリーニング・要約
+│       └── recorder.py        音声録音
+├── app/templates/
+│   ├── index.html             録音画面
+│   ├── vault.html             保管庫
+│   ├── inquiry.html           照会室
+│   ├── council.html           相談室
+│   ├── settings.html          設定画面
+│   └── help.html              取扱説明書
+├── app/static/
+│   ├── css/style.css          共通スタイル
+│   ├── js/recorder.js         録音画面JS
+│   ├── js/settings.js         設定画面JS
+│   ├── cove.ico               ファビコン
+│   └── img/personas/          ペルソナアイコン画像
+├── uploads/                   録音WAVファイル ※gitignore
+└── vault/                     保管庫ファイル ※gitignore
 ```
 
 ---
 
-## 設定・カスタマイズ
+## 環境変数（.env）
 
-### AI モードの切り替え
+```env
+# AIモード: business（Ollama）/ personal（Groq）
+AI_MODE=business
 
-設定画面（⚙️）→ AI モードから切り替えられます。
+# Groq APIキー（personalモード時のみ必要）
+GROQ_API_KEY=
 
-| モード | 説明 |
-|---|---|
-| **ビジネス用** | 完全ローカル（Ollama）。インターネット不要。秘匿性最大。 |
-| 個人用 | Groq API を使用（API キー必要）。高速だがクラウド送信あり。 |
+# Ollamaモデル名
+OLLAMA_MODEL=gemma3:27b
+```
 
-### Ollama モデルの変更
-
-設定画面 → Ollama モデル設定 からモデルを切り替えられます。
-
-| モデル | VRAM 目安 | 特徴 |
-|---|---|---|
-| `gemma3:27b` | 16GB〜 | **推奨**・高精度 |
-| `gemma3:12b` | 8GB〜 | 軽量・高速 |
-| `llama3.1:8b` | 6GB〜 | 最軽量 |
-
-### ペルソナのカスタマイズ
-
-設定画面 → ペルソナ管理 から 8 種のペルソナを追加・編集・削除できます。  
-システムプロンプトを書き換えることで、業界特化型のペルソナを作成できます。
+`env.example` をコピーして `.env` を作成してください。
 
 ---
 
-## データベース構成
-
-```
-categories        カテゴリ管理
-recordings        録音データ（文字起こし・要約含む）
-vault_memos       テキストメモ
-vault_files       アップロードファイル
-persona_settings  ペルソナ定義・システムプロンプト
-council_sessions  相談履歴
-council_adopted   採用回答・★評価
-```
-
----
-
-## プライバシー・セキュリティ
-
-- **ビジネス用モードでは、すべての処理がローカルで完結します**
-- 音声データ・テキスト・相談内容は外部サーバーに一切送信されません
-- データは `app/cove.db`（SQLite）と `uploads/`（WAV ファイル）にのみ保存されます
-- Ollama は `127.0.0.1:11434` でローカル起動します
-
----
-
-## トラブルシューティング
-
-### Ollama が起動しない
+## PyInstallerでのビルド
 
 ```bash
-# Ollama の状態確認
-ollama list
-
-# 手動起動
-ollama serve
+uv run pyinstaller cove.spec
 ```
 
-### 文字起こしが失敗する
-
-- Ollama が起動しているか確認してください
-- `faster-whisper` のインストールを確認してください
-
+**Mac用アイコン（.icns）の事前準備**
 ```bash
-uv add faster-whisper
+iconutil -c icns cove.iconset
+# → cove.icns が生成される（cove.spec の icon= を cove.icns に変更）
 ```
 
-### ffmpeg が見つからない
-
-トリミング機能を使用するには ffmpeg が必要です。
-
-```bash
-# Windows
-winget install ffmpeg
-
-# Mac
-brew install ffmpeg
-```
-
-PowerShell / ターミナルを再起動後に再試行してください。
-
-### ポート 5001 が使用中
-
-```bash
-# Windows
-netstat -ano | findstr :5001
-
-# Mac / Linux
-lsof -i :5001
-```
+ビルド成果物は `dist/COVE/` に生成されます。
 
 ---
 
 ## 技術スタック
 
-| カテゴリ | 技術 |
+| 項目 | 内容 |
 |---|---|
 | バックエンド | Python 3.12 / Flask |
-| データベース | SQLite |
-| AI 推論（ローカル） | Ollama（llama.cpp ベース） |
-| 文字起こし | faster-whisper |
-| フロントエンド | HTML / CSS / Vanilla JS |
-| 音声処理 | Web Audio API / ffmpeg |
 | パッケージ管理 | uv |
+| データベース | SQLite3 |
+| ローカルLLM | Ollama（gemma3:27b推奨） |
+| 文字起こし | faster-whisper |
+| 音声処理 | sounddevice / soundfile |
+| フロントエンド | HTML / CSS / Vanilla JS（SSEストリーミング） |
+
+---
+
+## プライバシー・セキュリティ
+
+- すべての処理はPC上でローカルに完結
+- 録音・メモ・相談内容は外部サーバーに送信されません
+- インターネット通信が発生するのは初回セットアップ時と保管庫のWebデータ取得のみ
+
+詳細は [SECURITY.md](SECURITY.md) を参照してください。
 
 ---
 
 ## ライセンス
 
-Private - All Rights Reserved  
-© 2026 AURA / workntones-cyber
+[LICENSE](LICENSE) を参照してください。
+
+### 使用しているOSS
+
+| ソフトウェア | ライセンス | 用途 |
+|---|---|---|
+| Flask | BSD License | Webサーバー |
+| faster-whisper | MIT License | 音声文字起こし |
+| Ollama | MIT License | ローカルLLM実行 |
+| SQLite | Public Domain | データベース |
+| ffmpeg | LGPL / GPL | 音声トリミング |
+
+---
+
+## 免責事項
+
+COVEが提供する情報はAIによる参考意見です。法的・財務的・医療的判断など重要な意思決定は、必ず専門家の意見を確認してください。AIの回答は誤りを含む場合があります。最終判断は必ず人間が行ってください。
