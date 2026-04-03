@@ -50,6 +50,8 @@
     .persona-card .prole { font-size:11px; color:var(--muted); margin-top:2px; }
     .persona-card .pskill { font-size:12px; margin-top:6px; color:#ccc; }
     code { background:#1a1a2e; padding:2px 6px; border-radius:4px; }
+    .badge-local { display:inline-block; background:rgba(52,211,153,.12); color:#34D399; border:1px solid rgba(52,211,153,.3); border-radius:99px; padding:2px 10px; font-size:11px; font-weight:600; }
+    .badge-cloud { display:inline-block; background:rgba(251,146,60,.12); color:#FB923C; border:1px solid rgba(251,146,60,.3); border-radius:99px; padding:2px 10px; font-size:11px; font-weight:600; }
     @media(max-width:900px){ .sidebar{display:none;} .main{padding:24px 20px 80px;} .persona-grid{grid-template-columns:1fr;} }
   </style>
 </head>
@@ -60,6 +62,7 @@
     <div class="sidebar-nav">
       <div class="section-label">はじめに</div>
       <a href="#about">COVEとは</a>
+      <a href="#ai-mode">AIモードについて</a>
       <a href="#requirements">システム要件</a>
       <div class="section-label">セットアップ</div>
       <a href="#before-start">はじめる前に</a>
@@ -72,6 +75,7 @@
       <a href="#usage-start">起動・終了</a>
       <a href="#usage-record">録音画面</a>
       <a href="#usage-vault">保管庫</a>
+      <a href="#usage-inquiry">照会室</a>
       <a href="#usage-council">相談室</a>
       <a href="#usage-settings">設定画面</a>
       <div class="section-label">活用のコツ</div>
@@ -81,6 +85,7 @@
       <a href="#trouble">トラブルシューティング</a>
       <a href="#trouble-ollama">Ollamaが起動しない</a>
       <a href="#trouble-model">モデルが見つからない</a>
+      <a href="#trouble-slow">要約に時間がかかる</a>
       <a href="#trouble-ffmpeg">ffmpegエラー</a>
       <div class="section-label">その他</div>
       <a href="#privacy">プライバシー</a>
@@ -92,21 +97,34 @@
     <div class="note note-ok">✅ 本ドキュメントはWindows・Mac両対応のセットアップ手順と操作方法を説明します。</div>
 
     <h2 id="about">1. COVEとは</h2>
-    <p>COVEは、役職者の意思決定を多角的な視点からサポートするローカルAIツールです。すべての処理がPC上で完結するため、機密性の高い情報を外部に送信することなく利用できます。</p>
+    <p>COVEは、役職者の意思決定を多角的な視点からサポートするAIツールです。完全ローカル動作を基本とし、機密性の高い情報を外部に送信することなく利用できます。必要に応じてクラウドAIとの切り替えも可能です。</p>
     <ul>
-      <li>🎙️ <strong>録音・文字起こし</strong>：会議や打ち合わせを録音し、AIが自動で文字起こし・要約</li>
+      <li>🎙️ <strong>録音・文字起こし</strong>：会議や打ち合わせを録音し、AIが自動で文字起こし・クリーニング・要約</li>
       <li>🗄️ <strong>保管庫</strong>：テキストメモ・ファイル・Webデータ・録音データを一元管理</li>
-      <li>💬 <strong>相談室</strong>：8人のAIペルソナが多角的な視点から意見を提示</li>
-      <li>⚙️ <strong>設定</strong>：ペルソナのカスタマイズ・カテゴリ管理</li>
+      <li>🔍 <strong>照会室</strong>：保管庫のデータをもとにAIが質問に回答</li>
+      <li>💬 <strong>相談室</strong>：複数のAIペルソナが多角的な視点から意見を提示</li>
+      <li>⚙️ <strong>設定</strong>：AIモード・ペルソナ・カテゴリの管理</li>
     </ul>
-    <div class="note note-ok">✅ COVEは完全ローカル動作のため、インターネット接続は初期セットアップ時のダウンロードのみに使用します。</div>
+    <div class="note note-ok">✅ ローカルモード時、インターネット接続は初期セットアップ時のダウンロードのみに使用します。</div>
 
-    <h2 id="requirements">2. システム要件</h2>
+    <h2 id="ai-mode">2. AIモードについて</h2>
+    <p>COVEはナビゲーションバーに現在のAIモードを常時表示します。機密情報を扱う前に必ず確認してください。</p>
+    <table>
+      <tr><th>モード</th><th>文字起こし</th><th>AI処理</th><th>機密性</th><th>速度</th></tr>
+      <tr><td><span class="badge-local">🏠 Ollama</span></td><td>ローカル（faster-whisper）</td><td>ローカル（Ollama）</td><td>◎ 完全ローカル</td><td>△ 低速</td></tr>
+      <tr><td><span class="badge-cloud">⚡ Groq</span></td><td>Groq Whisper API</td><td>Groq LLaMA</td><td>△ クラウド</td><td>◎ 高速・無料枠あり</td></tr>
+      <tr><td><span class="badge-cloud">🤖 GPT-4o</span></td><td>Groq Whisper API</td><td>OpenAI GPT-4o</td><td>△ クラウド</td><td>◎ 高速</td></tr>
+      <tr><td><span class="badge-cloud">✨ Gemini</span></td><td>Groq Whisper API</td><td>Google Gemini</td><td>△ クラウド</td><td>◎ 高速</td></tr>
+      <tr><td><span class="badge-cloud">🔷 Claude</span></td><td>Groq Whisper API</td><td>Anthropic Claude</td><td>△ クラウド</td><td>◎ 高速</td></tr>
+    </table>
+    <div class="note note-warn">⚠️ クラウドモード時は音声・テキストデータが外部サーバーに送信されます。機密情報を含む会議にはローカルモードを使用してください。</div>
+
+    <h2 id="requirements">3. システム要件</h2>
     <h3>■ Windows</h3>
     <table>
       <tr><th>項目</th><th>最小要件</th><th>推奨</th></tr>
       <tr><td>OS</td><td>Windows 10 64bit</td><td>Windows 11</td></tr>
-      <tr><td>RAM</td><td>16GB</td><td>32GB以上</td></tr>
+      <tr><td>RAM</td><td>16GB</td><td>64GB以上</td></tr>
       <tr><td>VRAM</td><td>8GB</td><td>16GB以上</td></tr>
       <tr><td>ストレージ</td><td>30GB以上</td><td>50GB以上</td></tr>
       <tr><td>その他</td><td>インターネット接続（初回のみ）</td><td>NVIDIA GPU（CUDA対応）</td></tr>
@@ -115,19 +133,17 @@
     <table>
       <tr><th>項目</th><th>最小要件</th><th>推奨</th></tr>
       <tr><td>チップ</td><td>Apple Silicon（M1以降）</td><td>M5 Pro以降</td></tr>
-      <tr><td>RAM</td><td>16GB</td><td>36GB以上</td></tr>
+      <tr><td>RAM</td><td>16GB</td><td>64GB以上</td></tr>
       <tr><td>ストレージ</td><td>30GB以上</td><td>50GB以上</td></tr>
       <tr><td>OS</td><td>macOS 13 Ventura以降</td><td>最新版</td></tr>
     </table>
-    <div class="note">ℹ️ MacはApple SiliconのUnified Memory（統合メモリ）を活用するため、16GB RAMでもWindowsの16GB VRAMと同等以上の性能が得られます。</div>
+    <div class="note">ℹ️ MacはApple SiliconのUnified Memory（統合メモリ）を活用するため、同じRAM容量でもWindowsより効率的にAI処理を行えます。</div>
 
-    <h2 id="install-uv">3. インストール手順</h2>
-
+    <h2 id="install-uv">4. インストール手順</h2>
     <div class="note note-ok" id="before-start" style="margin-bottom:24px;">
       <strong>📋 はじめる前に ― コマンドラインツールについて</strong>
     </div>
-
-    <p>セットアップでは <strong>コマンドラインツール</strong> を使います。コマンドと呼ばれる命令文を入力してPCを操作するツールです。難しそうに見えますが、このページのコマンドを<strong>コピーして貼り付けてEnterを押すだけ</strong>でOKです。</p>
+    <p>セットアップでは <strong>コマンドラインツール</strong> を使います。このページのコマンドを<strong>コピーして貼り付けてEnterを押すだけ</strong>でOKです。</p>
 
     <h3>■ コマンドラインツールの開き方</h3>
     <div class="os-tabs">
@@ -140,26 +156,14 @@
         <li>メニューから <strong>「PowerShell」</strong> または <strong>「ターミナル」</strong> をクリック</li>
         <li>黒い画面（またはウィンドウ）が開いたら準備完了</li>
       </ol>
-      <div class="note">ℹ️ 「管理者として実行」が必要な場合は、右クリックメニューから「Windows PowerShell（管理者）」を選んでください。</div>
     </div>
     <div id="cli-1" class="os-content">
       <ol>
         <li>キーボードの <strong>Cmd（⌘）+ Space</strong> を押してSpotlight検索を開く</li>
         <li><strong>「Terminal」</strong> と入力してEnterを押す</li>
-        <li>白または黒いウィンドウが開いたら準備完了</li>
+        <li>ウィンドウが開いたら準備完了</li>
       </ol>
-      <div class="note">ℹ️ LaunchpadのToolsフォルダ内にもTerminalがあります。</div>
     </div>
-
-    <h3>■ コマンドの実行方法</h3>
-    <ol>
-      <li>このページの <strong>「コピー」ボタン</strong> を押してコマンドをコピー</li>
-      <li>PowerShell / Terminal のウィンドウをクリックしてアクティブにする</li>
-      <li><strong>Ctrl+V（Windows）</strong> または <strong>Cmd+V（Mac）</strong> で貼り付ける</li>
-      <li><strong>Enterキー</strong> を押して実行</li>
-      <li>処理が完了するまで待つ（完了すると新しい入力行が表示される）</li>
-    </ol>
-    <div class="note note-warn">⚠️ コマンドの実行中はウィンドウを閉じないでください。処理が途中で止まってしまいます。</div>
 
     <h3 id="install-uv">■ Step 1: uvのインストール</h3>
     <div class="os-tabs">
@@ -198,7 +202,8 @@
     <div class="code-block">ollama pull gemma3:27b<button class="copy-btn" onclick="copyCode(this)">コピー</button></div>
     <div class="note note-warn">⚠️ ダウンロードには30分〜2時間程度かかります。完了するまでウィンドウを閉じないでください。</div>
 
-    <h3 id="install-ffmpeg">■ Step 4: ffmpegのインストール（トリミング機能用）</h3>
+    <h3 id="install-ffmpeg">■ Step 4: ffmpegのインストール</h3>
+    <p>音声のノーマライズ（音量均一化）・トリミング機能に使用します。</p>
     <div class="os-tabs">
       <button class="os-tab active" onclick="switchOS(this,'ffmpeg')">Windows</button>
       <button class="os-tab" onclick="switchOS(this,'ffmpeg')">Mac</button>
@@ -209,13 +214,12 @@
     <div id="ffmpeg-1" class="os-content">
       <div class="code-block">brew install ffmpeg<button class="copy-btn" onclick="copyCode(this)">コピー</button></div>
     </div>
-    <div class="note">ℹ️ ffmpegは録音のトリミング機能を使う場合のみ必要です。録音・文字起こし・相談機能はffmpegなしでも利用できます。</div>
 
     <h3 id="install-cove">■ Step 5: COVEのセットアップ</h3>
     <div class="code-block">cd cove-by-aura<br>uv sync<button class="copy-btn" onclick="copyCode(this)">コピー</button></div>
     <div class="note">ℹ️「uv sync」は初回のみ必要です。以後は起動コマンドのみでOKです。</div>
 
-    <h2 id="usage-start">4. 起動・終了方法</h2>
+    <h2 id="usage-start">5. 起動・終了方法</h2>
     <h3>■ 起動</h3>
     <div class="code-block">cd cove-by-aura<br>uv run python main.py<button class="copy-btn" onclick="copyCode(this)">コピー</button></div>
     <p>起動後、ブラウザが自動で開きます。開かない場合は <code>http://127.0.0.1:5001</code> にアクセスしてください。</p>
@@ -224,49 +228,89 @@
     <p>画面右上の「⏻ 終了」ボタンをクリックします。</p>
     <div class="note note-warn">⚠️ ブラウザのタブを閉じるだけではCOVEは終了しません。必ず「終了」ボタンを使用してください。</div>
 
-    <h2 id="usage-record">5. 画面の使い方</h2>
+    <h2 id="usage-record">6. 画面の使い方</h2>
     <h3>■ 🎙️ 録音画面</h3>
     <ol>
       <li>「録音開始」ボタンを押して録音を開始</li>
       <li>録音が終わったら「録音停止」ボタンを押す</li>
       <li>自動で文字起こし → クリーニング → 要約が実行される</li>
-      <li>完了後、テキストを確認・保存</li>
+      <li>完了後、3つのタブで各段階の結果を確認できる</li>
     </ol>
-    <h3>手動トリミング</h3>
+
+    <h3>■ 結果の3タブ表示</h3>
+    <table>
+      <tr><th>タブ</th><th>内容</th></tr>
+      <tr><td>📝 文字起こし</td><td>faster-whisperによる生の文字起こし結果</td></tr>
+      <tr><td>🧹 クリーニング済み</td><td>フィラー・重複除去・改行整形済みのテキスト</td></tr>
+      <tr><td>✨ AI要約</td><td>発言録と概要まとめの2部構成</td></tr>
+    </table>
+    <div class="note">ℹ️ 要約の内容に不明な点があれば「クリーニング済み」タブで原文を確認できます。</div>
+
+    <h3>■ 手動再試行</h3>
+    <p>録音履歴の各カードから個別に再処理できます。</p>
+    <ul>
+      <li>🔄 <strong>文字起こし</strong>：文字起こしからやり直し</li>
+      <li>🧹 <strong>再クリーニング</strong>：クリーニングのみ再実行</li>
+      <li>🔄 <strong>再要約</strong>：要約のみ再実行</li>
+    </ul>
+
+    <h3>■ 手動トリミング</h3>
     <ol>
       <li>録音一覧の「✂️ トリミング」ボタンをクリック</li>
       <li>波形を見ながら開始・終了スライダーで範囲を指定</li>
-      <li>「▶ 再生」または「✂️ 範囲のみ再生」で確認</li>
       <li>「✂️ トリミング実行」で上書き保存</li>
     </ol>
 
     <h3 id="usage-vault">■ 🗄️ 保管庫</h3>
     <ul>
-      <li><strong>テキストメモ</strong>：自由にメモを入力。利用者情報カテゴリは常に相談に参照される</li>
+      <li><strong>テキストメモ</strong>：自由にメモを入力。「利用者情報」カテゴリは相談・照会で常に参照される</li>
       <li><strong>ファイル</strong>：PDFや文書ファイルをアップロードしてAIが要約</li>
       <li><strong>Webデータ</strong>：URLを入力して参考ページの内容を取得</li>
       <li><strong>録音データ</strong>：録音済みの音声を追加してテキスト化</li>
     </ul>
 
+    <h3 id="usage-inquiry">■ 🔍 照会室</h3>
+    <p>保管庫に蓄積したデータをもとにAI（アーカイバー）が質問に回答します。過去の会議内容・メモ・ファイルを横断的に参照できます。</p>
+    <ol>
+      <li>カテゴリと参照するデータを選択</li>
+      <li>質問を入力して「照会する」を押す</li>
+      <li>アーカイバーがデータをもとに回答</li>
+      <li>フォローアップ質問で深掘りできる</li>
+    </ol>
+    <div class="note">ℹ️ 保管庫のデータが充実するほど、照会の精度が上がります。</div>
+
     <h3 id="usage-council">■ 💬 相談室</h3>
     <ol>
-      <li>カテゴリを選択して相談内容を入力</li>
-      <li>「相談する」ボタンを押す</li>
-      <li>8人のペルソナが順番に意見を述べる</li>
+      <li>カテゴリとペルソナグループを選択</li>
+      <li>相談内容を入力して「相談する」を押す</li>
+      <li>各ペルソナが順番に意見を述べる（画面下部のパネルで確認）</li>
       <li>採用したい回答の「採用する」ボタンを押す</li>
       <li>「相談終了」で終了し、最終判断メモを入力して保存</li>
     </ol>
-    <div class="note">ℹ️ 採用した回答に★評価をつけると、次回の相談でそのペルソナがより精度の高い回答をするようになります。</div>
+    <div class="note">ℹ️ ← → ボタンでペルソナの回答を切り替えられます。採用した回答に★評価をつけると履歴で管理できます。</div>
 
     <h3 id="usage-settings">■ ⚙️ 設定画面</h3>
+    <h3>AIモード設定</h3>
+    <ul>
+      <li>ローカル／クラウドをスイッチで切り替え、サービスをドロップダウンで選択</li>
+      <li>クラウドモード選択時はAPIキーを入力して保存</li>
+      <li>現在のモードはナビゲーションバーに常時表示される</li>
+    </ul>
+    <h3>最大録音時間（Ollamaモード時）</h3>
+    <ul>
+      <li>PCのRAMに基づいて選択肢が自動生成される（30分単位・目安）</li>
+      <li>長時間ほど要約に使用するメモリが増え、処理時間も長くなる</li>
+    </ul>
+    <h3>ペルソナ管理</h3>
     <ul>
       <li>ペルソナ名またはアイコンをクリック → 編集ポップアップが開く</li>
       <li>アイコンは待機用・考え中用の2種類を設定可能</li>
       <li>システムプロンプトを変更するとAIの回答スタイルが変わる</li>
+      <li>グループ管理でペルソナをグループ分けし、相談室で切り替えられる</li>
     </ul>
     <div class="note note-ng">🚫 デンジャーゾーン：録音・メモ・ファイル・Webデータ・相談履歴の全削除が可能です。取り消せないため慎重に操作してください。</div>
 
-    <h2 id="tips-persona">6. 活用のコツ</h2>
+    <h2 id="tips-persona">7. 活用のコツ</h2>
     <h3>■ 効果的なプロンプトの3原則</h3>
     <p><strong>① 役割を断言する</strong></p>
     <p>❌ 悪い例：あなたは財務の専門家です。<br>
@@ -286,18 +330,18 @@
       <div class="persona-card"><div class="pname">👤 ユーザー視点</div><div class="prole">現場・顧客目線</div><div class="pskill">第一印象・離脱ポイント</div></div>
       <div class="persona-card"><div class="pname">🔥 クレーマー</div><div class="prole">批判・欠点指摘</div><div class="pskill">致命的欠陥・矛盾の発見</div></div>
       <div class="persona-card"><div class="pname">📣 マーケッター</div><div class="prole">市場・ブランド戦略</div><div class="pskill">売れる/売れない判定・差別化</div></div>
-      <div class="persona-card"><div class="pname">🗂 アーカイバー</div><div class="prole">情報抽出・記録整理</div><div class="pskill">保管庫から事実・記録を抽出・整理</div></div>
     </div>
+    <div class="note">ℹ️ 照会室専用の「🗂 アーカイバー」は保管庫データの抽出・整理に特化しています。</div>
 
     <h3 id="tips-vault">■ 保管庫の活用ポイント</h3>
     <ul>
-      <li>「利用者情報」カテゴリに自分の役職・業界・状況を詳しく登録する（相談精度が大幅に上がる）</li>
+      <li>「利用者情報」カテゴリに自分の役職・業界・状況を詳しく登録する（相談・照会の精度が大幅に上がる）</li>
       <li>相談テーマに関連するWebページやドキュメントを事前に保管庫に登録する</li>
       <li>過去の会議録音を要約して保管しておく</li>
     </ul>
-    <div class="note note-ok">✅ 保管庫の情報が充実するほど、ペルソナの回答が具体的・的確になります。</div>
+    <div class="note note-ok">✅ 保管庫の情報が充実するほど、ペルソナの回答と照会の精度が具体的・的確になります。</div>
 
-    <h2 id="trouble">7. トラブルシューティング</h2>
+    <h2 id="trouble">8. トラブルシューティング</h2>
     <h3>■ 起動できない</h3>
     <p><strong>「uvが見つかりません」</strong>：Step 1のuvインストールを確認し、PowerShell/Terminalを再起動してください。</p>
     <p><strong>ブラウザが開かない</strong>：手動で <code>http://127.0.0.1:5001</code> にアクセスしてください。</p>
@@ -311,7 +355,9 @@
       <ul>
         <li>タスクマネージャーで「ollama.exe」が動いているか確認</li>
         <li>動いていない場合はスタートメニューから「Ollama」を起動</li>
+        <li>または以下のコマンドで強制停止後に再起動</li>
       </ul>
+      <div class="code-block">taskkill /F /IM ollama.exe<button class="copy-btn" onclick="copyCode(this)">コピー</button></div>
     </div>
     <div id="ot-1" class="os-content">
       <ul>
@@ -327,7 +373,17 @@
     <p>VRAMが不足する場合は小さいモデルをお試しください。</p>
     <div class="code-block">ollama pull gemma3:12b<button class="copy-btn" onclick="copyCode(this)">コピー</button></div>
 
-    <h3 id="trouble-ffmpeg">■ ffmpegが見つからない（トリミングエラー）</h3>
+    <h3 id="trouble-slow">■ 要約に時間がかかる・処理が止まる</h3>
+    <p>1時間以上の長い録音では要約処理に30分以上かかる場合があります。</p>
+    <ul>
+      <li>設定画面の「最大録音時間」を短く設定するとメモリ使用量が減り安定する</li>
+      <li>処理中は他のアプリの起動・ファイル編集を控える</li>
+      <li>処理が完全に止まった場合は以下で強制停止できる</li>
+    </ul>
+    <div class="code-block">ollama stop gemma3:27b<button class="copy-btn" onclick="copyCode(this)">コピー</button></div>
+    <div class="note">ℹ️ 処理中のOllamaの状態は <code>ollama ps</code> で確認できます。CONTEXTが8192の場合は設定画面で最大録音時間を確認してください。</div>
+
+    <h3 id="trouble-ffmpeg">■ ffmpegが見つからない（トリミング・ノーマライズエラー）</h3>
     <div class="os-tabs">
       <button class="os-tab active" onclick="switchOS(this,'ft')">Windows</button>
       <button class="os-tab" onclick="switchOS(this,'ft')">Mac</button>
@@ -351,22 +407,26 @@
       <li>COVEを再起動する</li>
     </ol>
 
-    <h2 id="privacy">8. プライバシー・ライセンス</h2>
-    <div class="note note-ok">✅ COVEはすべての処理をPC上でローカルに実行します。入力した情報・録音データ・相談内容は外部サーバーに送信されません。</div>
+    <h2 id="privacy">9. プライバシー・ライセンス</h2>
+    <div class="note note-ok">✅ ローカルモード（Ollama）時、COVEはすべての処理をPC上でローカルに実行します。入力した情報・録音データ・相談内容は外部サーバーに送信されません。</div>
+    <div class="note note-warn">⚠️ クラウドモード（Groq・OpenAI・Gemini・Claude）使用時は、音声データとテキストデータが各サービスのサーバーに送信されます。各サービスのプライバシーポリシーに従って管理されます。機密情報を含む場合はローカルモードをご利用ください。</div>
+
     <h3>■ データの保存場所</h3>
     <ul>
       <li>データベース：<code>cove-by-aura/app/cove.db</code></li>
       <li>録音ファイル：<code>cove-by-aura/uploads/</code></li>
       <li>設定ファイル：<code>cove-by-aura/.env</code></li>
     </ul>
+
     <h3>■ 使用しているOSSライセンス</h3>
     <table>
       <tr><th>ソフトウェア</th><th>ライセンス</th><th>用途</th></tr>
       <tr><td>Flask</td><td>BSD License</td><td>Webサーバー</td></tr>
-      <tr><td>faster-whisper</td><td>MIT License</td><td>音声文字起こし</td></tr>
+      <tr><td>faster-whisper</td><td>MIT License</td><td>音声文字起こし（large-v3-turbo）</td></tr>
       <tr><td>Ollama</td><td>MIT License</td><td>ローカルLLM実行</td></tr>
       <tr><td>SQLite</td><td>Public Domain</td><td>データベース</td></tr>
-      <tr><td>ffmpeg</td><td>LGPL / GPL</td><td>音声トリミング</td></tr>
+      <tr><td>ffmpeg</td><td>LGPL / GPL</td><td>音声ノーマライズ・トリミング</td></tr>
+      <tr><td>psutil</td><td>BSD License</td><td>システムRAM情報取得</td></tr>
     </table>
     <div class="note note-warn">⚠️ AIの回答は誤りを含む場合があります。最終判断は必ず人間が行ってください。</div>
   </main>

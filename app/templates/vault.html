@@ -361,7 +361,39 @@ function showFileInfo(file) {
 document.addEventListener('DOMContentLoaded', async () => {
   await loadCategories();
   await loadAll();
+  _restoreVaultInputs();
 });
+
+function _restoreVaultInputs() {
+  // 復元するフィールド一覧
+  const fields = [
+    { id: 'memoTitle',    key: 'cove_vault_memo_title',    event: 'input' },
+    { id: 'memoBody',     key: 'cove_vault_memo_body',     event: 'input' },
+    { id: 'memoCategoryId', key: 'cove_vault_memo_cat',   event: 'change' },
+    { id: 'webUrl',       key: 'cove_vault_web_url',       event: 'input' },
+    { id: 'webCategoryId', key: 'cove_vault_web_cat',      event: 'change' },
+    { id: 'recTitle',     key: 'cove_vault_rec_title',     event: 'input' },
+    { id: 'recMemo',      key: 'cove_vault_rec_memo',      event: 'input' },
+    { id: 'recCategoryId', key: 'cove_vault_rec_cat',      event: 'change' },
+  ];
+  fields.forEach(({ id, key, event }) => {
+    const el = document.getElementById(id);
+    if(!el) return;
+    const saved = sessionStorage.getItem(key);
+    if(saved !== null) el.value = saved;
+    el.addEventListener(event, () => sessionStorage.setItem(key, el.value));
+  });
+}
+
+function _clearVaultInputs(prefix) {
+  // 登録完了後に該当タブの入力をクリア
+  const prefixMap = {
+    memo: ['cove_vault_memo_title', 'cove_vault_memo_body', 'cove_vault_memo_cat'],
+    web:  ['cove_vault_web_url', 'cove_vault_web_cat'],
+    rec:  ['cove_vault_rec_title', 'cove_vault_rec_memo', 'cove_vault_rec_cat'],
+  };
+  (prefixMap[prefix] || []).forEach(key => sessionStorage.removeItem(key));
+}
 
 // ── カテゴリ ──────────────────────────────────────
 async function loadCategories() {
@@ -655,6 +687,7 @@ function clearMemoForm() {
   _editingMemoId = null;
   document.getElementById('memoTitle').value = '';
   document.getElementById('memoBody').value  = '';
+  _clearVaultInputs('memo');
 }
 
 // ── ファイル ──────────────────────────────────────
@@ -846,6 +879,8 @@ function _startWebPolling(total) {
         showToast('✅ ' + data.message);
         await loadAll();
         _resetWebProgress();
+        document.getElementById('webUrl').value = '';
+        _clearVaultInputs('web');
       } else if (data.status === 'error') {
         showToast('❌ ' + data.message);
         _resetWebProgress();
@@ -941,6 +976,7 @@ async function uploadRecording(file) {
     setTimeout(() => { progress.style.display = 'none'; }, 2500);
     document.getElementById('recTitle').value = '';
     document.getElementById('recMemo').value  = '';
+    _clearVaultInputs('rec');
     showToast('録音データを登録しました ✓');
 
   } catch(err) {

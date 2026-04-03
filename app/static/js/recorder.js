@@ -18,7 +18,7 @@ const speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
 // ── 初期化 ────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
   buildVisualizer();
-  loadCategories();
+  await loadCategories();
   loadHistory();
   checkApiKey();
   checkBlackHole();
@@ -269,7 +269,14 @@ async function runTranscribe(recordId) {
   }
 
   document.getElementById('transcriptBody').textContent = data.transcript;
-  document.getElementById('summaryBody').textContent    = data.ai_summary;
+  document.getElementById('cleanedBody').textContent    = data.cleaned_transcript || '';
+  // 要約エラーがあればエラーメッセージ＋前回の要約を表示
+  const summaryEl = document.getElementById('summaryBody');
+  if (data.summary_error) {
+    summaryEl.innerHTML = `<div style="color:#E24B4A;font-size:12px;margin-bottom:8px;padding:8px 10px;background:rgba(226,75,74,.08);border-radius:6px;border-left:3px solid #E24B4A;">⚠️ ${data.summary_error}</div>${data.ai_summary ? `<div>${data.ai_summary}</div>` : ''}`;
+  } else {
+    summaryEl.textContent = data.ai_summary;
+  }
   document.getElementById('resultSection').classList.add('visible');
 
   document.getElementById('titleInput').value = '';
@@ -336,7 +343,15 @@ async function retryLatestTranscribe() {
       step3.querySelector('.step-icon').textContent = '③';
       step3.querySelector('span').textContent = 'AI要約中...'; }
 
-    await runTranscription(latest.id);
+    // 結果タブをクリア
+    const tb = document.getElementById('transcriptBody');
+    const cb = document.getElementById('cleanedBody');
+    const sb = document.getElementById('summaryBody');
+    if (tb) tb.textContent = '';
+    if (cb) cb.textContent = '';
+    if (sb) sb.textContent = '';
+
+    await runTranscribe(latest.id);
   } catch (e) {
     showToast('❌ 再試行に失敗しました');
   }
@@ -454,23 +469,26 @@ async function loadHistory() {
         </div>
 
         <!-- 文字起こし / クリーニング / 要約 タブ -->
-        ${(r.transcript || r.cleaned_transcript || r.ai_summary) ? `
+        ${(r.transcript || r.transcript_error || r.cleaned_transcript || r.cleaning_error || r.ai_summary || r.summary_error) ? `
           <div class="content-tabs">
-            ${r.transcript ? `<div class="content-tab active" id="tab-tr-${r.id}" onclick="showTab(${r.id},'transcript')">📝 文字起こし</div>` : ''}
-            ${r.cleaned_transcript ? `<div class="content-tab" id="tab-cl-${r.id}" onclick="showTab(${r.id},'cleaned')">🧹 クリーニング済み</div>` : ''}
-            ${r.ai_summary ? `<div class="content-tab" id="tab-su-${r.id}" onclick="showTab(${r.id},'summary')">✨ AI要約</div>` : ''}
+            ${(r.transcript || r.transcript_error) ? `<div class="content-tab active" id="tab-tr-${r.id}" onclick="showTab(${r.id},'transcript')">📝 文字起こし${r.transcript_error ? ' ⚠️' : ''}</div>` : ''}
+            ${(r.cleaned_transcript || r.cleaning_error) ? `<div class="content-tab" id="tab-cl-${r.id}" onclick="showTab(${r.id},'cleaned')">🧹 クリーニング済み${r.cleaning_error ? ' ⚠️' : ''}</div>` : ''}
+            ${(r.ai_summary || r.summary_error) ? `<div class="content-tab" id="tab-su-${r.id}" onclick="showTab(${r.id},'summary')">✨ AI要約${r.summary_error ? ' ⚠️' : ''}</div>` : ''}
           </div>
-          ${r.transcript ? `
+          ${(r.transcript || r.transcript_error) ? `
             <div class="content-panel active" id="panel-transcript-${r.id}">
-              <div class="history-content">${escHtml(r.transcript)}</div>
+              ${r.transcript_error ? `<div style="color:#E24B4A;font-size:12px;margin-bottom:8px;padding:8px 10px;background:rgba(226,75,74,.08);border-radius:6px;border-left:3px solid #E24B4A;">⚠️ ${escHtml(r.transcript_error)}</div>` : ''}
+              ${r.transcript ? `<div class="history-content">${escHtml(r.transcript)}</div>` : ''}
             </div>` : ''}
-          ${r.cleaned_transcript ? `
+          ${(r.cleaned_transcript || r.cleaning_error) ? `
             <div class="content-panel" id="panel-cleaned-${r.id}">
-              <div class="history-content">${escHtml(r.cleaned_transcript)}</div>
+              ${r.cleaning_error ? `<div style="color:#E24B4A;font-size:12px;margin-bottom:8px;padding:8px 10px;background:rgba(226,75,74,.08);border-radius:6px;border-left:3px solid #E24B4A;">⚠️ ${escHtml(r.cleaning_error)}</div>` : ''}
+              ${r.cleaned_transcript ? `<div class="history-content">${escHtml(r.cleaned_transcript)}</div>` : ''}
             </div>` : ''}
-          ${r.ai_summary ? `
+          ${(r.ai_summary || r.summary_error) ? `
             <div class="content-panel" id="panel-summary-${r.id}">
-              <div class="history-content">${escHtml(r.ai_summary)}</div>
+              ${r.summary_error ? `<div style="color:#E24B4A;font-size:12px;margin-bottom:8px;padding:8px 10px;background:rgba(226,75,74,.08);border-radius:6px;border-left:3px solid #E24B4A;">⚠️ ${escHtml(r.summary_error)}</div>` : ''}
+              ${r.ai_summary ? `<div class="history-content">${escHtml(r.ai_summary)}</div>` : ''}
             </div>` : ''}
         ` : ''}
 
@@ -1146,10 +1164,15 @@ function restoreInputs() {
   if (!titleEl || !memoEl) return;
 
   // 保存済みの値を復元
-  const savedTitle = sessionStorage.getItem('cove_title');
-  const savedMemo  = sessionStorage.getItem('cove_memo');
+  const savedTitle    = sessionStorage.getItem('cove_title');
+  const savedMemo     = sessionStorage.getItem('cove_memo');
+  const savedCategory = sessionStorage.getItem('cove_rec_category');
   if (savedTitle !== null) titleEl.value = savedTitle;
   if (savedMemo  !== null) memoEl.value  = savedMemo;
+  if (savedCategory !== null) {
+    const sel = document.getElementById('categorySelect');
+    if (sel) sel.value = savedCategory;
+  }
 
   // 入力のたびにsessionStorageに保存
   titleEl.addEventListener('input', () => {
@@ -1158,6 +1181,12 @@ function restoreInputs() {
   memoEl.addEventListener('input', () => {
     sessionStorage.setItem('cove_memo', memoEl.value);
   });
+  const catSel = document.getElementById('categorySelect');
+  if (catSel) {
+    catSel.addEventListener('change', () => {
+      sessionStorage.setItem('cove_rec_category', catSel.value);
+    });
+  }
 }
 
 // ── 文字起こし・要約の再実行 ─────────────────────
@@ -1198,6 +1227,28 @@ function startProgressPolling(recordId) {
       if(data.record_id !== recordId) return;
       const elapsed = data.elapsed || 0;
       showProgressBar(recordId, data.message || '', data.progress || 0, elapsed);
+
+      // 文字起こし完了時点で随時タブに表示
+      if(data.transcript) {
+        const el = document.getElementById(`panel-transcript-${recordId}`);
+        if(el && !el.querySelector('.history-content')) {
+          el.innerHTML = `<div class="history-content">${escHtml(data.transcript)}</div>`;
+        }
+      }
+      // クリーニング完了時点で随時タブに表示
+      if(data.cleaned_transcript) {
+        const el = document.getElementById(`panel-cleaned-${recordId}`);
+        if(el && !el.querySelector('.history-content')) {
+          el.innerHTML = `<div class="history-content">${escHtml(data.cleaned_transcript)}</div>`;
+        }
+        // カードを開いて表示
+        const item = document.getElementById(`history-${recordId}`);
+        if(item && !item.classList.contains('open')) {
+          const detail = item.querySelector('.history-detail');
+          if(detail) { item.classList.add('open'); detail.style.display = 'block'; }
+        }
+      }
+
       if(data.status === 'done' || data.status === 'error') {
         stopProgressPolling();
         hideProgressBar(recordId);
@@ -1240,6 +1291,9 @@ function hideProgressBar(recordId) {
 
 async function retryClean(recordId) {
   if (!confirm('クリーニングを再実行しますか？')) return;
+  // クリーニングパネルをクリア
+  const clEl = document.getElementById(`panel-cleaned-${recordId}`);
+  if (clEl) clEl.textContent = '';
   setRetryState(recordId, 'cleaning');
   startProgressPolling(recordId);
   try {
@@ -1253,6 +1307,7 @@ async function retryClean(recordId) {
     if(data.status === 'done') {
       showToast('✅ クリーニングが完了しました');
       await loadHistory();
+      _showHistoryCardResult(recordId, data);
     } else {
       setRetryState(recordId, 'idle');
       showToast('❌ 失敗: ' + (data.message || 'エラー'));
@@ -1266,6 +1321,11 @@ async function retryClean(recordId) {
 
 async function retryTranscribe(recordId) {
   if (!confirm('文字起こしと要約を再実行しますか？')) return;
+  // 該当カードのテキストをクリア
+  ['transcript','cleaned','summary'].forEach(type => {
+    const el = document.getElementById(`panel-${type}-${recordId}`);
+    if (el) el.querySelector('pre,div,p') ? el.querySelector('pre,div,p').textContent = '' : el.textContent = '';
+  });
   setRetryState(recordId, 'transcribing');
   startProgressPolling(recordId);
   try {
@@ -1279,19 +1339,24 @@ async function retryTranscribe(recordId) {
     if(data.status === 'done') {
       showToast('✅ 文字起こし・要約が完了しました');
       await loadHistory();
+      // 該当カードのタブに結果を反映して開く
+      _showHistoryCardResult(recordId, data);
     } else {
       setRetryState(recordId, 'idle');
-      showToast('❌ 失敗: ' + (data.message || 'エラー'));
+      showToast('❌ ' + (data.message || '文字起こしに失敗しました'), true);
     }
   } catch(e) {
     stopProgressPolling(); hideProgressBar(recordId);
     setRetryState(recordId, 'idle');
-    showToast('❌ ネットワークエラー');
+    showToast('❌ ネットワークエラーが発生しました', true);
   }
 }
 
 async function retrySummary(recordId) {
   if (!confirm('要約を再実行しますか？')) return;
+  // 要約パネルをクリア
+  const suEl = document.getElementById(`panel-summary-${recordId}`);
+  if (suEl) suEl.textContent = '';
   const extraPromptEl = document.getElementById(`extra-prompt-${recordId}`);
   const extraPrompt   = extraPromptEl ? extraPromptEl.value.trim() : '';
   setRetryState(recordId, 'summarizing');
@@ -1307,9 +1372,10 @@ async function retrySummary(recordId) {
     if(data.status === 'done') {
       showToast('✅ 要約が完了しました');
       await loadHistory();
+      _showHistoryCardResult(recordId, data);
     } else {
       setRetryState(recordId, 'idle');
-      showToast('❌ 失敗: ' + (data.message || 'エラー'));
+      showToast('❌ ' + (data.message || '要約に失敗しました'), true);
     }
   } catch(e) {
     stopProgressPolling(); hideProgressBar(recordId);
@@ -1404,4 +1470,45 @@ async function shutdownApp() {
   setTimeout(() => {
     document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:Arial;color:#888;font-size:18px;">COVEを終了しました。このタブを閉じてください。</div>';
   }, 500);
+}
+
+// 再試行完了後に履歴カードの該当タブを開いて結果を表示
+function _showHistoryCardResult(recordId, data) {
+  const item = document.getElementById(`history-${recordId}`);
+  if (!item) return;
+
+  // カードを開く
+  const detail = item.querySelector('.history-detail');
+  if (detail) {
+    item.classList.add('open');
+    detail.style.display = 'block';
+  }
+
+  // 各パネルに結果をセット
+  if (data.transcript) {
+    const el = document.getElementById(`panel-transcript-${recordId}`);
+    if (el) el.innerHTML = `<div class="history-content">${escHtml(data.transcript)}</div>`;
+    document.getElementById(`tab-tr-${recordId}`)?.classList.add('active');
+  }
+  if (data.cleaned_transcript) {
+    const el = document.getElementById(`panel-cleaned-${recordId}`);
+    if (el) el.innerHTML = `<div class="history-content">${escHtml(data.cleaned_transcript)}</div>`;
+  }
+  if (data.ai_summary) {
+    const el = document.getElementById(`panel-summary-${recordId}`);
+    if (el) el.innerHTML = `<div class="history-content">${escHtml(data.ai_summary)}</div>`;
+  }
+
+  // 先頭タブをアクティブに
+  const firstTab = item.querySelector('.content-tab');
+  const panels   = item.querySelectorAll('.content-panel');
+  if (firstTab && panels.length) {
+    item.querySelectorAll('.content-tab').forEach(t => t.classList.remove('active'));
+    panels.forEach(p => p.classList.remove('active'));
+    firstTab.classList.add('active');
+    panels[0].classList.add('active');
+  }
+
+  // スクロールして見える位置に
+  item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }

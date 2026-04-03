@@ -52,10 +52,13 @@ def init_db() -> None:
                 wav_file            TEXT    NOT NULL DEFAULT '',
                 transcript          TEXT    NOT NULL DEFAULT '',
                 transcript_status   TEXT    NOT NULL DEFAULT 'pending',
+                transcript_error    TEXT    NOT NULL DEFAULT '',
                 cleaned_transcript  TEXT    NOT NULL DEFAULT '',
                 cleaning_status     TEXT    NOT NULL DEFAULT 'pending',
+                cleaning_error      TEXT    NOT NULL DEFAULT '',
                 ai_summary          TEXT    NOT NULL DEFAULT '',
                 summary_status      TEXT    NOT NULL DEFAULT 'pending',
+                summary_error       TEXT    NOT NULL DEFAULT '',
                 category_id         INTEGER NOT NULL DEFAULT 1
                                     REFERENCES categories(id) ON UPDATE CASCADE,
                 created_at          TEXT    NOT NULL,
@@ -97,6 +100,16 @@ def init_db() -> None:
             UPDATE recordings SET summary_status = 'done'
             WHERE ai_summary != '' AND summary_status = 'pending'
         """)
+        # エラーカラムのマイグレーション（既存テーブルへの追加）
+        existing_cols = [row[1] for row in conn.execute("PRAGMA table_info(recordings)").fetchall()]
+        for col, default in [
+            ("transcript_error", "''"),
+            ("cleaning_error",   "''"),
+            ("summary_error",    "''"),
+        ]:
+            if col not in existing_cols:
+                conn.execute(f"ALTER TABLE recordings ADD COLUMN {col} TEXT NOT NULL DEFAULT {default}")
+        conn.commit()
 
 
         # ── 保管庫：テキストメモテーブル ─────────────
@@ -440,9 +453,12 @@ def _recording_to_dict(row) -> dict:
     keys = row.keys()
     d = dict(row)
     d.setdefault("transcript_status",  "pending")
+    d.setdefault("transcript_error",   "")
     d.setdefault("cleaned_transcript", "")
     d.setdefault("cleaning_status",    "pending")
+    d.setdefault("cleaning_error",     "")
     d.setdefault("summary_status",     "pending")
+    d.setdefault("summary_error",      "")
     d.setdefault("category_id",        1)
     return d
 
@@ -456,7 +472,9 @@ def update_transcript_and_summary(record_id: int, transcript: str, ai_summary: s
             """
             UPDATE recordings
             SET transcript = ?, ai_summary = ?,
-                transcript_status = ?, summary_status = ?, updated_at = ?
+                transcript_status = ?, transcript_error = '',
+                cleaning_error = '',
+                summary_status = ?, summary_error = '', updated_at = ?
             WHERE id = ?
             """,
             (transcript, ai_summary, t_status, s_status, now, record_id),
@@ -465,12 +483,49 @@ def update_transcript_and_summary(record_id: int, transcript: str, ai_summary: s
     print(f"[database] 文字起こし・要約を保存: id={record_id} (transcript:{t_status}, summary:{s_status})")
 
 
-def update_cleaned_transcript(record_id: int, cleaned_transcript: str) -> None:
+
+
+def update_transcript_error(record_id: int, error_message: str) -> None:
+    """文字起こしエラーをDBに保存する"""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    status = "done" if cleaned_transcript else "error"
     with get_connection() as conn:
         conn.execute(
-            "UPDATE recordings SET cleaned_transcript = ?, cleaning_status = ?, updated_at = ? WHERE id = ?",
+            "UPDATE recordings SET transcript_error = ?, transcript_status = 'error', updated_at = ? WHERE id = ?",
+            (error_message, now, record_id),
+        )
+        conn.commit()
+    print(f"[database] 文字起こしエラーを保存: id={record_id}")
+
+
+def update_summary_error(record_id: int, error_message: str) -> None:
+    """要約エラーをDBに保存する（ai_summaryは更新しない）"""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE recordings SET summary_error = ?, summary_status = 'error', updated_at = ? WHERE id = ?",
+            (error_message, now, record_id),
+        )
+        conn.commit()
+    print(f"[database] 要約エラーを保存: id={record_id}")
+
+
+def update_cleaning_error(record_id: int, error_message: str) -> None:
+    """クリーニングエラーをDBに保存する"""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE recordings SET cleaning_error = ?, cleaning_status = 'error', updated_at = ? WHERE id = ?",
+            (error_message, now, record_id),
+        )
+        conn.commit()
+    print(f"[database] クリーニングエラーを保存: id={record_id}")
+
+def update_cleaned_transcript(record_id: int, cleaned_transcript: str) -> None:
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    status = "done" if cleaned_transcript else "pending"
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE recordings SET cleaned_transcript = ?, cleaning_status = ?, cleaning_error = '', updated_at = ? WHERE id = ?",
             (cleaned_transcript, status, now, record_id),
         )
         conn.commit()
@@ -823,7 +878,7 @@ def get_context_for_category(category_id: int) -> dict:
     """指定カテゴリに紐づくコンテキストデータを収集する"""
     with get_connection() as conn:
         recordings = conn.execute(
-            "SELECT id, title, ai_summary FROM recordings WHERE category_id = ? AND ai_summary != '' ORDER BY created_at DESC LIMIT 10",
+            "SELECT id, title, cleaned_transcript, ai_summary FROM recordings WHERE category_id = ? AND (cleaned_transcript != '' OR ai_summary != '') ORDER BY created_at DESC LIMIT 10",
             (category_id,)
         ).fetchall()
         memos = conn.execute(
@@ -861,7 +916,7 @@ def get_context_for_categories(category_ids: list) -> dict:
     placeholders = ",".join("?" * len(category_ids))
     with get_connection() as conn:
         recordings = conn.execute(
-            f"SELECT id, title, ai_summary, category_id FROM recordings WHERE category_id IN ({placeholders}) AND ai_summary != '' ORDER BY created_at DESC LIMIT 20",
+            f"SELECT id, title, cleaned_transcript, ai_summary, category_id FROM recordings WHERE category_id IN ({placeholders}) AND (cleaned_transcript != '' OR ai_summary != '') ORDER BY created_at DESC LIMIT 20",
             category_ids
         ).fetchall()
         memos = conn.execute(

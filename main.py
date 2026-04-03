@@ -16,6 +16,9 @@ from app.database import (
     init_db,
     update_title_and_memo,
     update_transcript_and_summary,
+    update_summary_error,
+    update_cleaning_error,
+    update_transcript_error,
     update_recording_category,
     get_all_categories,
     create_category,
@@ -154,19 +157,21 @@ def inquiry_ask():
             key = f"rec_{r['id']}"
             if not use_all_context and key not in context_keys:
                 continue
-            if r.get("ai_summary"):
-                parts.append(f"[録音:{r['title']}{cat_label(r)}]\n{r['ai_summary'][:2000]}")
+            # ai_summaryを優先、なければcleaned_transcript（5000文字上限）にフォールバック
+            ref_text = r.get("ai_summary") or r.get("cleaned_transcript") or ""
+            if ref_text:
+                parts.append(f"[録音:{r['title']}{cat_label(r)}]\n{ref_text[:5000]}")
         for m in ctx.get("memos", []):
             key = f"memo_{m['id']}"
             if not use_all_context and key not in context_keys:
                 continue
-            parts.append(f"[メモ:{m['title']}{cat_label(m)}]\n{m['body'][:2000]}")
+            parts.append(f"[メモ:{m['title']}{cat_label(m)}]\n{m['body'][:5000]}")
         for f in ctx.get("files", []):
             key = f"file_{f['id']}"
             if not use_all_context and key not in context_keys:
                 continue
             if f.get("summary"):
-                parts.append(f"[ファイル:{f['original_name']}{cat_label(f)}]\n{f['summary'][:2000]}")
+                parts.append(f"[ファイル:{f['original_name']}{cat_label(f)}]\n{f['summary'][:5000]}")
         return "\n\n".join(parts)
 
     context_text = build_context_text()
@@ -210,7 +215,8 @@ def inquiry_ask():
                     messages.append({"role": role, "content": content})
             messages.append({"role": "user", "content": question})
 
-            options     = {"num_predict": 1024, "num_ctx": 8192, "temperature": 0.2}
+            from app.services.transcriber import _get_summary_num_ctx
+            options     = {"num_predict": 4096, "num_ctx": _get_summary_num_ctx(), "temperature": 0.2, "repeat_penalty": 1.2}
             full_answer = ""
 
             if is_local_mode(ai_mode):
@@ -535,9 +541,12 @@ def vault_recording_upload():
                 return
 
             if result["status"] == "error":
+                from app.services.transcriber import _parse_api_error as _pae
+                err_msg = result.get('message', '不明なエラー')
+                update_transcript_error(record_id, err_msg)
                 _recording_upload_status = {
                     "status": "error",
-                    "message": f"文字起こしに失敗しました: {result.get('message', '')}",
+                    "message": err_msg,
                     "progress": 0, "step": "error"
                 }
                 return
@@ -687,8 +696,15 @@ def vault_files_upload():
             _file_summarize_status = {"status": "done", "message": f"完了: {file.filename}"}
         except Exception as e:
             print(f"[vault] ファイル要約エラー: {e}")
-            update_vault_file_summary(file_id, f"（整形エラー: {str(e)}）")
-            _file_summarize_status = {"status": "error", "message": str(e)}
+            from app.services.transcriber import _parse_api_error as _pae2
+            from app.services.llm import get_provider as _gp2
+            _env2    = _read_env()
+            _mode2   = _env2.get("AI_MODE", "ollama")
+            _prov2   = _gp2(_mode2)
+            _pname2  = getattr(_prov2, "DISPLAY_NAME", _mode2) if _prov2 else _mode2
+            err_msg2 = _pae2(e, _pname2)
+            update_vault_file_summary(file_id, f"（{err_msg2}）")
+            _file_summarize_status = {"status": "error", "message": err_msg2}
 
     import threading
     threading.Thread(target=_summarize, daemon=True).start()
@@ -729,7 +745,9 @@ def _extract_text(path: Path, ext: str) -> str:
         elif ext in (".txt", ".md"):
             return path.read_text(encoding="utf-8", errors="ignore")
     except Exception as e:
-        print(f"[vault] テキスト抽出エラー: {e}")
+        from app.services.transcriber import _parse_api_error as _pae4
+        err_msg4 = _pae4(e)
+        print(f"[vault] テキスト抽出エラー: {err_msg4}")
     return ""
 
 
@@ -949,9 +967,11 @@ def vault_web_fetch():
 
             except Exception as e:
                 print(f"[vault] Web取得エラー ({url}): {e}")
+                from app.services.transcriber import _parse_api_error as _pae3
+                err_msg3 = _pae3(e)
                 create_vault_memo(
                     "取得失敗: " + (title or url),
-                    "URL: " + url + "\n\nエラー: " + str(e),
+                    "URL: " + url + "\n\nエラー: " + err_msg3,
                     category_id
                 )
 
@@ -1061,16 +1081,27 @@ def transcribe():
     _transcribe_start_time = _time.time()
     _transcribe_progress   = {"status": "running", "step": "transcribe", "message": "🎙️ 文字起こし開始…", "progress": 5, "record_id": record_id}
 
-    def on_progress(step, message, progress):
+    def on_progress(step, message, progress, transcript=None, cleaned_transcript=None):
         global _transcribe_progress
-        _transcribe_progress = {"status": "running", "step": step, "message": message, "progress": progress, "record_id": record_id}
+        _transcribe_progress = {
+            "status":             "running",
+            "step":               step,
+            "message":            message,
+            "progress":           progress,
+            "record_id":          record_id,
+            "transcript":         transcript or _transcribe_progress.get("transcript", ""),
+            "cleaned_transcript": cleaned_transcript or _transcribe_progress.get("cleaned_transcript", ""),
+        }
 
     extra_prompt = data.get("extra_prompt", "").strip()
     from app.services.transcriber import transcribe_and_summarize
     result = transcribe_and_summarize(record["wav_file"], extra_prompt, record_id, progress_callback=on_progress)
 
     if result["status"] == "error":
-        _transcribe_progress = {"status": "error", "step": "error", "message": f"⚠️ {result.get('message','')}", "progress": 0, "record_id": record_id}
+        err_msg = result.get("message", "不明なエラーが発生しました")
+        if record_id:
+            update_transcript_error(record_id, err_msg)
+        _transcribe_progress = {"status": "error", "step": "error", "message": f"⚠️ {err_msg}", "progress": 0, "record_id": record_id}
         return jsonify(result), 500
 
     if result.get("cleaned_transcript"):
@@ -1081,9 +1112,12 @@ def transcribe():
     _transcribe_progress = {"status": "done", "step": "done", "message": "✅ 完了！", "progress": 100, "record_id": record_id}
 
     return jsonify({
-        "status": "done",
-        "transcript": result["transcript"],
-        "ai_summary": result["ai_summary"],
+        "status":             "done",
+        "transcript":         result["transcript"],
+        "cleaned_transcript": result.get("cleaned_transcript", ""),
+        "ai_summary":         result["ai_summary"],
+        "summary_error":      "",
+        "cleaning_error":     "",
     }), 200
 
 
@@ -1424,8 +1458,11 @@ def clean_only():
         return jsonify({"status": "done", "cleaned_transcript": cleaned}), 200
 
     except Exception as e:
-        _transcribe_progress = {"status": "error", "step": "error", "message": f"⚠️ {str(e)}", "progress": 0, "record_id": record_id}
-        return jsonify({"status": "error", "message": f"クリーニングエラー: {str(e)}"}), 500
+        from app.services.transcriber import _parse_api_error
+        err_msg = _parse_api_error(e, "クリーニング")
+        update_cleaning_error(record_id, err_msg)
+        _transcribe_progress = {"status": "error", "step": "error", "message": f"⚠️ {err_msg}", "progress": 0, "record_id": record_id}
+        return jsonify({"status": "error", "message": err_msg}), 500
 
 
 @app.route("/api/summarize", methods=["POST"])
@@ -1460,14 +1497,42 @@ def summarize_only():
 
     try:
         extra_prompt = data.get("extra_prompt", "").strip()
-        from app.services.transcriber import _summarize_ollama
-        ai_summary = _summarize_ollama(record["transcript"], extra_prompt, progress_cb=on_progress)
+        env     = _read_env()
+        ai_mode = env.get("AI_MODE", "ollama")
+
+        # cleaned_transcriptを優先、なければtranscriptにフォールバック
+        source_text = record.get("cleaned_transcript") or record.get("transcript", "")
+
+        if ai_mode == "ollama":
+            from app.services.transcriber import _summarize_ollama
+            ai_summary = _summarize_ollama(source_text, extra_prompt, progress_cb=on_progress)
+        else:
+            from app.services.transcriber import _summarize_cloud
+            ai_summary = _summarize_cloud(source_text, extra_prompt, ai_mode, env)
+
+        # エラーメッセージが返された場合はエラーとして扱う
+        if ai_summary.startswith("（") and ai_summary.endswith("）"):
+            err_msg = ai_summary[1:-1]
+            # summary_errorに保存（ai_summaryは更新しない）
+            update_summary_error(record_id, err_msg)
+            _transcribe_progress = {"status": "error", "step": "error", "message": f"⚠️ {err_msg}", "progress": 0, "record_id": record_id}
+            return jsonify({"status": "error", "message": err_msg}), 500
+
+        # 成功時：ai_summaryを保存しsummary_errorをクリア
         update_transcript_and_summary(record_id, record["transcript"], ai_summary)
         _transcribe_progress = {"status": "done", "step": "done", "message": "✅ 要約完了！", "progress": 100, "record_id": record_id}
         return jsonify({"status": "done", "ai_summary": ai_summary}), 200
     except Exception as e:
-        _transcribe_progress = {"status": "error", "step": "error", "message": f"⚠️ {str(e)}", "progress": 0, "record_id": record_id}
-        return jsonify({"status": "error", "message": f"要約エラー: {str(e)}"}), 500
+        from app.services.transcriber import _parse_api_error
+        env2     = _read_env()
+        ai_mode2 = env2.get("AI_MODE", "ollama")
+        from app.services.llm import get_provider as _gp
+        _prov  = _gp(ai_mode2)
+        _pname = getattr(_prov, "DISPLAY_NAME", ai_mode2) if _prov else ai_mode2
+        err_msg = _parse_api_error(e, _pname)
+        update_summary_error(record_id, err_msg)
+        _transcribe_progress = {"status": "error", "step": "error", "message": f"⚠️ {err_msg}", "progress": 0, "record_id": record_id}
+        return jsonify({"status": "error", "message": err_msg}), 500
 
 @app.route("/api/model/status", methods=["GET"])
 def model_status():
@@ -1631,19 +1696,21 @@ def council_ask():
             key = f"rec_{r['id']}"
             if not use_all_context and key not in context_keys:
                 continue
-            if r.get("ai_summary"):
-                parts.append(f"[録音:{r['title']}{cat_label(r)}]\n{r['ai_summary'][:1000]}")
+            # ai_summaryを優先、なければcleaned_transcript（5000文字上限）にフォールバック
+            ref_text = r.get("ai_summary") or r.get("cleaned_transcript") or ""
+            if ref_text:
+                parts.append(f"[録音:{r['title']}{cat_label(r)}]\n{ref_text[:5000]}")
         for m in ctx.get("memos", []):
             key = f"memo_{m['id']}"
             if not use_all_context and key not in context_keys:
                 continue
-            parts.append(f"[メモ:{m['title']}{cat_label(m)}]\n{m['body'][:1000]}")
+            parts.append(f"[メモ:{m['title']}{cat_label(m)}]\n{m['body'][:5000]}")
         for f in ctx.get("files", []):
             key = f"file_{f['id']}"
             if not use_all_context and key not in context_keys:
                 continue
             if f.get("summary"):
-                parts.append(f"[ファイル:{f['original_name']}{cat_label(f)}]\n{f['summary'][:1000]}")
+                parts.append(f"[ファイル:{f['original_name']}{cat_label(f)}]\n{f['summary'][:5000]}")
         for s in ctx.get("sessions", []):
             if s.get("final_decision"):
                 label = cat_label(s)
@@ -1820,10 +1887,12 @@ def council_ask():
                             messages.append({"role": role, "content": hcontent})
                     messages.append({"role": "user", "content": user_content})
 
+                    from app.services.transcriber import _get_summary_num_ctx as _gsnc
                     options = {
-                        "temperature": PERSONA_TEMPERATURE.get(persona_name, DEFAULT_TEMPERATURE),
-                        "num_predict": 1024,
-                        "num_ctx":     4096,
+                        "temperature":    PERSONA_TEMPERATURE.get(persona_name, DEFAULT_TEMPERATURE),
+                        "num_predict":    2048,
+                        "num_ctx":        _gsnc(),
+                        "repeat_penalty": 1.2,
                     }
 
                     if is_local_mode(ai_mode):

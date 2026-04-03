@@ -4,10 +4,23 @@ LLMプロバイダーの動的読み込みユーティリティ
 """
 
 import importlib
+import sys
 from pathlib import Path
 
 # 除外ファイル（選択肢に表示しない）
 _EXCLUDE = {"__init__", "base"}
+
+
+def _get_llm_dir() -> Path:
+    """
+    llm/ディレクトリのパスを返す。
+    PyInstallerビルド時は _MEIPASS 配下、通常実行時はこのファイルの親ディレクトリ。
+    """
+    if getattr(sys, "frozen", False):
+        # PyInstallerで固めた実行ファイルとして起動している
+        return Path(sys._MEIPASS) / "app" / "services" / "llm"
+    else:
+        return Path(__file__).resolve().parent
 
 
 def get_all_providers() -> list[dict]:
@@ -19,7 +32,7 @@ def get_all_providers() -> list[dict]:
         [{"id": "ollama", "name": "Ollama（完全ローカル）", "requires_api_key": False, ...}, ...]
     """
     providers = []
-    llm_dir   = Path(__file__).resolve().parent
+    llm_dir   = _get_llm_dir()
 
     for py_file in sorted(llm_dir.glob("*.py")):
         module_name = py_file.stem

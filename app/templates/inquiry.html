@@ -361,6 +361,7 @@
     <a href="/council" class="nav-link {% if active_page=='council' %}active{% endif %}">💬 相談室</a>
     <a href="/settings"class="nav-link {% if active_page=='settings'%}active{% endif %}">⚙️ 設定</a>
     <a href="/help" target="_blank" class="nav-link" title="取扱説明書" style="font-size:18px;padding:4px 8px;">❓</a>
+    <a href="/settings" id="navAiBadge" class="nav-ai-badge local" title="AI設定を変更"><span class="nav-ai-name">Ollama</span><span class="nav-ai-type">ローカルAI</span></a>
     <button class="nav-shutdown-btn" onclick="shutdownApp()" title="終了">⏻ 終了</button>
   </div>
 </nav>
@@ -981,7 +982,7 @@ async function loadContextData() {
     catResults.forEach(({ catId, recs, memos, files }) => {
       const catName = catNameMap[catId] || `カテゴリ${catId}`;
       const sections = [
-        { icon:'🎙', label:'録音',    items: recs.filter(r=>r.ai_summary).map(r=>({ key:`rec_${r.id}`,  title:r.title||'無題', sub:r.created_at?r.created_at.slice(0,10):'', preview:r.ai_summary })) },
+        { icon:'🎙', label:'録音',    items: recs.filter(r=>r.cleaned_transcript||r.ai_summary).map(r=>({ key:`rec_${r.id}`,  title:r.title||'無題', sub:r.created_at?r.created_at.slice(0,10):'', preview:r.cleaned_transcript||r.ai_summary })) },
         { icon:'📝', label:'メモ',    items: memos.map(m=>({                       key:`memo_${m.id}`, title:m.title||'無題', sub:'', preview:m.body })) },
         { icon:'📁', label:'ファイル', items: files.filter(f=>f.summary).map(f=>({ key:`file_${f.id}`, title:f.original_name||'無題', sub:f.filetype||'', preview:f.summary })) },
       ];
@@ -1002,7 +1003,16 @@ async function loadContextData() {
           </div>
           <div class="ctx-acc-body open">`;
         sec.items.forEach(item => {
+          // sessionStorageから復元、なければデフォルトtrue
+        const _savedCtx = sessionStorage.getItem('cove_inq_context_keys');
+        if(_savedCtx) {
+          try {
+            const _parsed = JSON.parse(_savedCtx);
+            if(contextEnabled[item.key] === undefined) contextEnabled[item.key] = _parsed[item.key] !== false;
+          } catch(e) { if(contextEnabled[item.key] === undefined) contextEnabled[item.key] = true; }
+        } else {
           if(contextEnabled[item.key] === undefined) contextEnabled[item.key] = true;
+        }
           const on = contextEnabled[item.key] !== false;
           html += `<div class="ctx-item">
             <div style="flex:1;min-width:0;">
@@ -1047,6 +1057,7 @@ function toggleContext(key) {
   contextEnabled[key] = !contextEnabled[key];
   const btn = document.getElementById(`ctx-${key}`);
   if(btn) btn.className = `ctx-toggle ${contextEnabled[key]?'on':''}`;
+  sessionStorage.setItem('cove_inq_context_keys', JSON.stringify(contextEnabled));
 }
 
 function getEnabledContextKeys() {
@@ -1074,18 +1085,34 @@ function updateContextPanelHeight() {
   }
 }
 
+function adjustMainColPadding() {
+  const mainCol = document.querySelector('.main-col');
+  const rpg = document.getElementById('rpgPanel');
+  if (!mainCol) return;
+  const rpgVisible = rpg && rpg.classList.contains('visible');
+  if (rpgVisible) {
+    const rpgH = rpg.offsetHeight || 280;
+    mainCol.style.paddingBottom = (rpgH + 40) + 'px';
+  } else {
+    mainCol.style.paddingBottom = '80px';
+  }
+}
+
 function openRpgPanel() {
   document.getElementById('rpgPanel').classList.add('visible');
   const ba = document.getElementById('bottomArea');
   if(ba) ba.style.display = 'none';
   updateContextPanelHeight();
+  adjustMainColPadding();
 }
 function closeRpgPanel() {
   document.getElementById('rpgPanel').classList.remove('visible');
   const ba = document.getElementById('bottomArea');
   if(ba) ba.style.display = '';
   updateContextPanelHeight();
+  adjustMainColPadding();
 }
+
 
 // 相談終了：処理中でも中断して下段を表示し、履歴に保存
 async function endConsult() {
@@ -1634,6 +1661,11 @@ let selectedCategoryIds = [1];
 async function loadCategories() {
   try {
     const cats = await (await fetch('/api/categories')).json();
+    // sessionStorageから復元
+    const saved = sessionStorage.getItem('cove_inq_categories');
+    if(saved) {
+      try { selectedCategoryIds = JSON.parse(saved); } catch(e) {}
+    }
     buildCatDropdown(cats);
   } catch(e) {}
 }
@@ -1641,15 +1673,17 @@ async function loadCategories() {
 function buildCatDropdown(cats) {
   const dropdown = document.getElementById('multiCatDropdown');
   if(!dropdown) return;
-  // 「利用者情報」カテゴリはデフォルトでチェック済みにする
-  cats.forEach(c => {
-    if(c.name === '利用者情報' && !selectedCategoryIds.includes(c.id)) {
-      selectedCategoryIds = [c.id, ...selectedCategoryIds.filter(id => id !== 1)];
+  // sessionStorageに保存値がない場合のみデフォルト適用
+  const hasSaved = !!sessionStorage.getItem('cove_inq_categories');
+  if(!hasSaved) {
+    cats.forEach(c => {
+      if(c.name === '利用者情報' && !selectedCategoryIds.includes(c.id)) {
+        selectedCategoryIds = [c.id, ...selectedCategoryIds.filter(id => id !== 1)];
+      }
+    });
+    if(selectedCategoryIds.length === 0 && cats.length > 0) {
+      selectedCategoryIds = [cats[0].id];
     }
-  });
-  // 初期選択が [1] のままの場合、未分類もデフォルト選択に
-  if(selectedCategoryIds.length === 0 && cats.length > 0) {
-    selectedCategoryIds = [cats[0].id];
   }
   dropdown.innerHTML = cats.map(c => `
     <label class="multi-cat-item">
@@ -1692,6 +1726,7 @@ function onCatChange() {
   }
   updateCatLabel();
   loadContextData();
+  sessionStorage.setItem('cove_inq_categories', JSON.stringify(selectedCategoryIds));
 }
 
 function updateCatLabel() {
@@ -1732,6 +1767,13 @@ async function loadPersonaSettings() {
 window.addEventListener('load', async () => {
   await loadCategories();
   await loadContextData();
+  // 質問テキスト復元
+  const qEl = document.getElementById('inquiryQuestion');
+  if(qEl) {
+    const savedQ = sessionStorage.getItem('cove_inq_question');
+    if(savedQ) qEl.value = savedQ;
+    qEl.addEventListener('input', () => sessionStorage.setItem('cove_inq_question', qEl.value));
+  }
   adjustMainPadding();
   updateContextPanelHeight();
 
@@ -1979,6 +2021,28 @@ async function sendFeedback(btn, feedback, encodedQ, encodedA) {
     showToast('フィードバックの送信に失敗しました', true);
   }
 }
+</script>
+
+<script>
+(async function() {
+  try {
+    const res = await fetch('/api/settings');
+    const s   = await res.json();
+    const mode = (s.ai_mode || 'ollama').toLowerCase();
+    const badge = document.getElementById('navAiBadge');
+    if (!badge) return;
+    const meta = {
+      ollama: { label: 'Ollama',  type: 'ローカルAI', cls: 'local' },
+      groq:   { label: 'Groq',   type: 'クラウドAI', cls: 'cloud' },
+      openai: { label: 'GPT-4o', type: 'クラウドAI', cls: 'cloud' },
+      gemini: { label: 'Gemini', type: 'クラウドAI', cls: 'cloud' },
+      claude: { label: 'Claude', type: 'クラウドAI', cls: 'cloud' },
+    };
+    const m = meta[mode] || { label: mode, type: 'クラウドAI', cls: 'cloud' };
+    badge.innerHTML   = `<span class="nav-ai-name">${m.label}</span><span class="nav-ai-type">${m.type}</span>`;
+    badge.className   = 'nav-ai-badge ' + m.cls;
+  } catch(e) {}
+})();
 </script>
 </body>
 </html>

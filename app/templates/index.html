@@ -8,6 +8,25 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="icon" type="image/x-icon" href="/static/cove.ico">
   <link rel="stylesheet" href="/static/css/style.css">
+  <style>
+    /* ── 結果タブ ── */
+    .result-tabs {
+      display: flex; align-items: center; gap: 4px;
+      border-bottom: 1px solid var(--border);
+      padding: 0 4px 0 4px; margin-bottom: 12px; flex-wrap: wrap;
+    }
+    .result-tab {
+      background: transparent; border: none; border-bottom: 2px solid transparent;
+      padding: 8px 14px; font-size: 12px; font-weight: 600; color: var(--muted);
+      cursor: pointer; font-family: inherit; transition: all .15s;
+      margin-bottom: -1px;
+    }
+    .result-tab:hover { color: var(--text); }
+    .result-tab.active { color: #7C6AF7; border-bottom-color: #7C6AF7; }
+    .result-tab-content { display: none; }
+    .result-tab-content.active { display: block; }
+  </style>
+
 </head>
 <body>
 
@@ -36,6 +55,7 @@
     <a href="/council" class="nav-link {% if active_page == 'council' %}active{% endif %}">💬 相談室</a>
     <a href="/settings" class="nav-link {% if active_page == 'settings' %}active{% endif %}">⚙️ 設定</a>
     <a href="/help" target="_blank" class="nav-link" title="取扱説明書" style="font-size:18px;padding:4px 8px;">❓</a>
+    <a href="/settings" id="navAiBadge" class="nav-ai-badge local" title="AI設定を変更"><span class="nav-ai-name">Ollama</span><span class="nav-ai-type">ローカルAI</span></a>
     <button class="nav-shutdown-btn" onclick="shutdownApp()" title="COVEを終了する">⏻ 終了</button>
   </div>
 </nav>
@@ -139,18 +159,24 @@
   <!-- 結果表示 -->
   <div class="result-section" id="resultSection">
     <div class="result-card">
-      <div class="result-card-header">
-        <div class="result-card-title">📝 文字起こし</div>
-        <button class="export-btn" onclick="copyText('transcriptBody')">コピー</button>
+      <!-- タブ -->
+      <div class="result-tabs">
+        <button class="result-tab active" onclick="switchResultTab('transcript', this)">📝 文字起こし</button>
+        <button class="result-tab" onclick="switchResultTab('cleaned', this)">🧹 クリーニング済み</button>
+        <button class="result-tab" onclick="switchResultTab('summary', this)">✨ AI要約</button>
+        <button class="export-btn" id="resultCopyBtn" onclick="copyActiveTab()" style="margin-left:auto;">コピー</button>
+        <button class="export-btn" id="resultSaveBtn" onclick="exportText()" style="display:none;">保存</button>
       </div>
-      <div class="result-card-body" id="transcriptBody"></div>
-    </div>
-    <div class="result-card">
-      <div class="result-card-header">
-        <div class="result-card-title">✨ AI要約</div>
-        <button class="export-btn" onclick="exportText()">保存</button>
+      <!-- タブコンテンツ -->
+      <div class="result-tab-content active" id="tabTranscript">
+        <div class="result-card-body" id="transcriptBody"></div>
       </div>
-      <div class="result-card-body" id="summaryBody"></div>
+      <div class="result-tab-content" id="tabCleaned">
+        <div class="result-card-body" id="cleanedBody"></div>
+      </div>
+      <div class="result-tab-content" id="tabSummary">
+        <div class="result-card-body" id="summaryBody"></div>
+      </div>
     </div>
   </div>
 
@@ -164,12 +190,61 @@
 
 <div class="toast" id="toast"></div>
 
+<script>
+function switchResultTab(tab, btn) {
+  // タブボタンの切替
+  document.querySelectorAll('.result-tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  // コンテンツの切替
+  document.querySelectorAll('.result-tab-content').forEach(t => t.classList.remove('active'));
+  document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1)).classList.add('active');
+  // コピー/保存ボタンの切替
+  const saveBtn = document.getElementById('resultSaveBtn');
+  const copyBtn = document.getElementById('resultCopyBtn');
+  if(tab === 'summary') {
+    if(saveBtn) saveBtn.style.display = '';
+    if(copyBtn) copyBtn.style.display = 'none';
+  } else {
+    if(saveBtn) saveBtn.style.display = 'none';
+    if(copyBtn) copyBtn.style.display = '';
+  }
+}
+function copyActiveTab() {
+  const active = document.querySelector('.result-tab-content.active');
+  if(!active) return;
+  const body = active.querySelector('.result-card-body');
+  if(!body) return;
+  navigator.clipboard.writeText(body.textContent).then(() => showToast('コピーしました'));
+}
+</script>
 <script src="/static/js/recorder.js"></script>
 <script>
 // ページ離脱時にOllama処理を中断（シャットダウンはしない）
 window.addEventListener('pagehide', () => {
   navigator.sendBeacon('/api/ollama/abort', JSON.stringify({}));
 });
+</script>
+
+<script>
+(async function() {
+  try {
+    const res = await fetch('/api/settings');
+    const s   = await res.json();
+    const mode = (s.ai_mode || 'ollama').toLowerCase();
+    const badge = document.getElementById('navAiBadge');
+    if (!badge) return;
+    const meta = {
+      ollama: { label: 'Ollama',  type: 'ローカルAI', cls: 'local' },
+      groq:   { label: 'Groq',   type: 'クラウドAI', cls: 'cloud' },
+      openai: { label: 'GPT-4o', type: 'クラウドAI', cls: 'cloud' },
+      gemini: { label: 'Gemini', type: 'クラウドAI', cls: 'cloud' },
+      claude: { label: 'Claude', type: 'クラウドAI', cls: 'cloud' },
+    };
+    const m = meta[mode] || { label: mode, type: 'クラウドAI', cls: 'cloud' };
+    badge.innerHTML   = `<span class="nav-ai-name">${m.label}</span><span class="nav-ai-type">${m.type}</span>`;
+    badge.className   = 'nav-ai-badge ' + m.cls;
+  } catch(e) {}
+})();
 </script>
 </body>
 </html>

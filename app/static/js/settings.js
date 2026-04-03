@@ -387,6 +387,9 @@ async function loadSettings() {
     // Ollamaモデル一覧を取得して反映
     await loadOllamaModels(data.ollama_model || 'gemma3:27b');
 
+    // RAM情報を取得して録音時間選択肢を生成
+    await loadRamOptions(data.max_recording_minutes || 60);
+
     // 録音ソースを反映
     const recSource = data.recording_source || 'mic';
     selectRecSource(recSource, false);
@@ -452,7 +455,8 @@ async function saveSettings() {
     gemini_api_key:      (document.getElementById('apiKeyGemini')  || {}).value || '',
     anthropic_api_key:   (document.getElementById('apiKeyClaude')  || {}).value || '',
     recording_source:    currentRecSource,
-    ollama_model:        (document.getElementById('ollamaModelSelect') || {}).value || 'gemma3:27b',
+    ollama_model:            (document.getElementById('ollamaModelSelect')         || {}).value || 'gemma3:27b',
+    max_recording_minutes:   parseInt((document.getElementById('maxRecordingMinutesSelect') || {}).value || '60'),
   };
 
   const res  = await fetch('/api/settings', {
@@ -471,6 +475,7 @@ async function saveSettings() {
       btn.classList.remove('saved');
     }, 2000);
     showToast('✅ 設定を保存しました');
+    updateNavAiBadge(currentMode);
     // Ollamaモードの場合はモデルダウンロード進捗を表示
     if (currentMode === 'ollama') {
       startModelStatusPolling();
@@ -1291,3 +1296,48 @@ document.addEventListener('click', (e) => {
 document.addEventListener('DOMContentLoaded', () => {
   loadGroups();
 });
+
+// ── ナビゲーションのAIモードバッジを更新 ────────────
+function updateNavAiBadge(mode) {
+  const badge = document.getElementById('navAiBadge');
+  if (!badge) return;
+  const meta = {
+    ollama: { label: 'Ollama',  type: 'ローカルAI', cls: 'local' },
+    groq:   { label: 'Groq',   type: 'クラウドAI', cls: 'cloud' },
+    openai: { label: 'GPT-4o', type: 'クラウドAI', cls: 'cloud' },
+    gemini: { label: 'Gemini', type: 'クラウドAI', cls: 'cloud' },
+    claude: { label: 'Claude', type: 'クラウドAI', cls: 'cloud' },
+  };
+  const m = meta[(mode || 'ollama').toLowerCase()] || { label: mode, type: 'クラウドAI', cls: 'cloud' };
+  badge.innerHTML = `<span class="nav-ai-name">${m.label}</span><span class="nav-ai-type">${m.type}</span>`;
+  badge.className = 'nav-ai-badge ' + m.cls;
+}
+
+
+// ── RAM情報取得・録音時間選択肢生成 ────────────────
+async function loadRamOptions(currentMinutes) {
+  const sel     = document.getElementById('maxRecordingMinutesSelect');
+  const infoEl  = document.getElementById('ramInfo');
+  if (!sel) return;
+
+  try {
+    const res  = await fetch('/api/system/ram');
+    const data = await res.json();
+
+    // RAM情報表示
+    if (infoEl && data.total_gb > 0) {
+      infoEl.textContent = `RAM: ${data.total_gb}GB中 ${data.usable_gb}GB（80%）を使用します`;
+    }
+
+    // 選択肢を生成
+    sel.innerHTML = data.options.map(opt =>
+      `<option value="${opt.minutes}" ${opt.minutes === currentMinutes ? 'selected' : ''}>
+        ${opt.minutes}分（目安）
+      </option>`
+    ).join('');
+
+  } catch(e) {
+    if (infoEl) infoEl.textContent = 'RAM情報を取得できませんでした';
+    sel.innerHTML = `<option value="${currentMinutes}">${currentMinutes}分（目安）</option>`;
+  }
+}

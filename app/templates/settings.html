@@ -31,7 +31,7 @@
 
     /* ── AIモード枠：完全固定高さ ── */
     #aiModeCard {
-      height: 590px;        /* 最大パターン（クラウド固有APIキーあり）に合わせた固定値 */
+      height: 680px;        /* 最大パターン（クラウド固有APIキーあり）に合わせた固定値 */
       overflow-y: hidden;
       display: flex;
       flex-direction: column;
@@ -107,6 +107,7 @@
     <a href="/council" class="nav-link {% if active_page == 'council' %}active{% endif %}">💬 相談室</a>
     <a href="/settings" class="nav-link {% if active_page == 'settings' %}active{% endif %}">⚙️ 設定</a>
     <a href="/help" target="_blank" class="nav-link" title="取扱説明書" style="font-size:18px;padding:4px 8px;">❓</a>
+    <a href="/settings" id="navAiBadge" class="nav-ai-badge local" title="AI設定を変更"><span class="nav-ai-name">Ollama</span><span class="nav-ai-type">ローカルAI</span></a>
     <button class="nav-shutdown-btn" onclick="shutdownApp()" title="COVEを終了する">⏻ 終了</button>
   </div>
 </nav>
@@ -228,6 +229,18 @@
         <p style="font-size:11px;color:var(--muted);margin-top:4px;">
           ⚠️ 選択したモデルが未ダウンロードの場合はエラーになります。変更後は「設定を保存」してください。
         </p>
+
+        <!-- 録音時間設定 -->
+        <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);">
+          <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:6px;">🎙️ 最大録音時間（目安）</div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:8px;line-height:1.6;">
+            PCのRAMに基づいて設定します。長時間ほど要約に時間がかかります。<br>
+            <span id="ramInfo" style="color:var(--muted);">RAM情報を取得中…</span>
+          </div>
+          <select class="api-key-input" id="maxRecordingMinutesSelect" style="cursor:pointer;">
+            <option value="60">60分（目安）</option>
+          </select>
+        </div>
       </div>
 
     </div>
@@ -676,6 +689,28 @@
 window.addEventListener('pagehide', () => {
   navigator.sendBeacon('/api/ollama/abort', JSON.stringify({}));
 });
+</script>
+
+<script>
+(async function() {
+  try {
+    const res = await fetch('/api/settings');
+    const s   = await res.json();
+    const mode = (s.ai_mode || 'ollama').toLowerCase();
+    const badge = document.getElementById('navAiBadge');
+    if (!badge) return;
+    const meta = {
+      ollama: { label: 'Ollama',  type: 'ローカルAI', cls: 'local' },
+      groq:   { label: 'Groq',   type: 'クラウドAI', cls: 'cloud' },
+      openai: { label: 'GPT-4o', type: 'クラウドAI', cls: 'cloud' },
+      gemini: { label: 'Gemini', type: 'クラウドAI', cls: 'cloud' },
+      claude: { label: 'Claude', type: 'クラウドAI', cls: 'cloud' },
+    };
+    const m = meta[mode] || { label: mode, type: 'クラウドAI', cls: 'cloud' };
+    badge.innerHTML   = `<span class="nav-ai-name">${m.label}</span><span class="nav-ai-type">${m.type}</span>`;
+    badge.className   = 'nav-ai-badge ' + m.cls;
+  } catch(e) {}
+})();
 </script>
 </body>
 </html>
