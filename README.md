@@ -22,7 +22,7 @@ Collective Opinion & Vision Engine
 
 ## システム要件
 
-### Windows
+### Windows（動作検証済み）
 | 項目 | 最小要件 | 推奨 |
 |---|---|---|
 | OS | Windows 10 64bit | Windows 11 |
@@ -30,7 +30,7 @@ Collective Opinion & Vision Engine
 | VRAM | 8GB | 16GB以上（NVIDIA GPU） |
 | ストレージ | 30GB以上 | 50GB以上 |
 
-### Mac
+### Mac（動作検証 未実施）
 | 項目 | 最小要件 | 推奨 |
 |---|---|---|
 | チップ | Apple Silicon（M1以降） | M5 Pro以降 |
