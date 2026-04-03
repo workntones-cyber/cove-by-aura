@@ -500,7 +500,7 @@ def _summarize_ollama(transcript: str, extra_prompt: str = "", abort_event=None,
     if abort_event and abort_event.is_set():
         return ""
 
-    chunks = _chunk_text(transcript, max_chars=2000)
+    chunks = _chunk_text(transcript, max_chars=3000)
 
     if len(chunks) == 1:
         partial_summaries = [transcript]
@@ -513,16 +513,13 @@ def _summarize_ollama(transcript: str, extra_prompt: str = "", abort_event=None,
                 progress_cb(i + 1, len(chunks), final=False)
             print(f"[transcriber] 部分要約 {i+1}/{len(chunks)} チャンク...")
             prompt = (
-                "以下は会議の一部分を文字起こしたテキストです。\n"
-                "このテキストに含まれる発言・意見・数字・固有名詞・決定事項・アクションアイテムを\n"
-                "一切省略せずにそのまま書き出してください。\n"
-                "文字数制限はありません。テキストにある情報をすべて残してください。\n"
-                "要約・圧縮・解釈・推測による補完は禁止です。\n\n"
+                "以下のテキストに含まれる情報を箇条書きでまとめてください。\n"
+                "数字・固有名詞・日付・金額・具体的な内容は省略しないでください。\n\n"
                 f"【テキスト】\n{chunk}"
             )
             payload = json.dumps({
                 "model": _get_cleaning_model(), "prompt": prompt, "stream": False,
-                "options": {"num_ctx": 8192, "temperature": 0.1, "repeat_penalty": 1.3, "top_p": 0.3},
+                "options": {"num_ctx": 8192, "num_predict": 2048, "temperature": 0.1, "repeat_penalty": 1.3, "top_p": 0.3},
             }).encode("utf-8")
             req = urllib.request.Request(
                 "http://127.0.0.1:11434/api/generate", data=payload,

@@ -23,6 +23,7 @@
     }
     .result-tab:hover { color: var(--text); }
     .result-tab.active { color: #7C6AF7; border-bottom-color: #7C6AF7; }
+    .char-count { margin-left:5px; font-size:10px; color:var(--muted); font-weight:400; }
     .result-tab-content { display: none; }
     .result-tab-content.active { display: block; }
   </style>
@@ -161,9 +162,9 @@
     <div class="result-card">
       <!-- タブ -->
       <div class="result-tabs">
-        <button class="result-tab active" onclick="switchResultTab('transcript', this)">📝 文字起こし</button>
-        <button class="result-tab" onclick="switchResultTab('cleaned', this)">🧹 クリーニング済み</button>
-        <button class="result-tab" onclick="switchResultTab('summary', this)">✨ AI要約</button>
+        <button class="result-tab active" onclick="switchResultTab('transcript', this)">📝 文字起こし<span class="char-count" id="countTranscript"></span></button>
+        <button class="result-tab" onclick="switchResultTab('cleaned', this)">🧹 クリーニング済み<span class="char-count" id="countCleaned"></span></button>
+        <button class="result-tab" onclick="switchResultTab('summary', this)">✨ AI要約<span class="char-count" id="countSummary"></span></button>
         <button class="export-btn" id="resultCopyBtn" onclick="copyActiveTab()" style="margin-left:auto;">コピー</button>
         <button class="export-btn" id="resultSaveBtn" onclick="exportText()" style="display:none;">保存</button>
       </div>

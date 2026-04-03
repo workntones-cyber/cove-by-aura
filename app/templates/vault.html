@@ -135,7 +135,14 @@
       .vault-layout { grid-template-columns: 1fr; }
       .vault-right { position: static; }
     }
-  </style>
+  .vault-char-count {
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 4px;
+  text-align: right;
+  opacity: 0.7;
+}
+</style>
 </head>
 <body>
 <nav>
@@ -147,6 +154,7 @@
     <a href="/council" class="nav-link {% if active_page == 'council' %}active{% endif %}">💬 相談室</a>
     <a href="/settings" class="nav-link {% if active_page == 'settings' %}active{% endif %}">⚙️ 設定</a>
     <a href="/help" target="_blank" class="nav-link" title="取扱説明書" style="font-size:18px;padding:4px 8px;">❓</a>
+    <a href="/settings" id="navAiBadge" class="nav-ai-badge local" title="AI設定を変更"><span class="nav-ai-name">Ollama</span><span class="nav-ai-type">ローカルAI</span></a>
     <button class="nav-shutdown-btn" onclick="shutdownApp()" title="COVEを終了する">⏻ 終了</button>
   </div>
 </nav>
@@ -507,7 +515,7 @@ function renderList() {
             <button class="btn-xs btn-xs-danger" onclick="event.stopPropagation();deleteMemo(${item.id})">🗑️</button>
           </div>
         </div>
-        ${summary ? `<div class="vault-item-body">${escHtml(summary)}</div>` : ''}
+        ${summary ? `<div class="vault-item-body">${escHtml(summary)}<div class="vault-char-count">${summary.length.toLocaleString()}文字</div></div>` : ''}
       </div>`;
     } else if (item._type === 'memo') {
       return `<div class="vault-item" id="item-memo-${item.id}" onclick="toggleItem('item-memo-${item.id}')">
@@ -522,7 +530,7 @@ function renderList() {
             <button class="btn-xs btn-xs-danger" onclick="event.stopPropagation();deleteMemo(${item.id})">🗑️</button>
           </div>
         </div>
-        <div class="vault-item-body">${escHtml(item.body)}</div>
+        <div class="vault-item-body">${escHtml(item.body)}<div class="vault-char-count">${item.body.length.toLocaleString()}文字</div></div>
       </div>`;
     } else if (item._type === 'recording') {
       const summaryStatus = item.summary_status === 'pending' ? ' ⏳' : item.summary_status === 'error' ? ' ❌' : '';
@@ -537,7 +545,7 @@ function renderList() {
             <button class="btn-xs btn-xs-danger" onclick="event.stopPropagation();deleteRecordingItem(${item.id})">🗑️</button>
           </div>
         </div>
-        ${item.ai_summary ? `<div class="vault-item-body"><strong style="font-size:10px;color:var(--muted);">要約</strong><br>${escHtml(item.ai_summary)}</div>` : ''}
+        ${item.ai_summary ? `<div class="vault-item-body"><strong style="font-size:10px;color:var(--muted);">要約</strong><br>${escHtml(item.ai_summary)}<div class="vault-char-count">${item.ai_summary.length.toLocaleString()}文字</div></div>` : ''}
       </div>`;
     } else {
       const icon   = iconMap[item.filetype]||'📎';
@@ -994,6 +1002,28 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function shutdownApp() { if(!confirm('COVEを終了しますか？'))return; fetch('/api/shutdown',{method:'POST'}).catch(()=>{}); window.close(); setTimeout(()=>{document.body.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:Arial;color:#888;">COVEを終了しました。このタブを閉じてください。</div>';},500); }
+</script>
+
+<script>
+(async function() {
+  try {
+    const res = await fetch('/api/settings');
+    const s   = await res.json();
+    const mode = (s.ai_mode || 'ollama').toLowerCase();
+    const badge = document.getElementById('navAiBadge');
+    if (!badge) return;
+    const meta = {
+      ollama: { label: 'Ollama',  type: 'ローカルAI', cls: 'local' },
+      groq:   { label: 'Groq',   type: 'クラウドAI', cls: 'cloud' },
+      openai: { label: 'GPT-4o', type: 'クラウドAI', cls: 'cloud' },
+      gemini: { label: 'Gemini', type: 'クラウドAI', cls: 'cloud' },
+      claude: { label: 'Claude', type: 'クラウドAI', cls: 'cloud' },
+    };
+    const m = meta[mode] || { label: mode, type: 'クラウドAI', cls: 'cloud' };
+    badge.innerHTML   = `<span class="nav-ai-name">${m.label}</span><span class="nav-ai-type">${m.type}</span>`;
+    badge.className   = 'nav-ai-badge ' + m.cls;
+  } catch(e) {}
+})();
 </script>
 </body>
 </html>

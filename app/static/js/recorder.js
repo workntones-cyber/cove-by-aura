@@ -277,6 +277,9 @@ async function runTranscribe(recordId) {
   } else {
     summaryEl.textContent = data.ai_summary;
   }
+  updateCharCount('transcriptBody', 'countTranscript');
+  updateCharCount('cleanedBody',    'countCleaned');
+  updateCharCount('summaryBody',    'countSummary');
   document.getElementById('resultSection').classList.add('visible');
 
   document.getElementById('titleInput').value = '';
@@ -471,9 +474,9 @@ async function loadHistory() {
         <!-- 文字起こし / クリーニング / 要約 タブ -->
         ${(r.transcript || r.transcript_error || r.cleaned_transcript || r.cleaning_error || r.ai_summary || r.summary_error) ? `
           <div class="content-tabs">
-            ${(r.transcript || r.transcript_error) ? `<div class="content-tab active" id="tab-tr-${r.id}" onclick="showTab(${r.id},'transcript')">📝 文字起こし${r.transcript_error ? ' ⚠️' : ''}</div>` : ''}
-            ${(r.cleaned_transcript || r.cleaning_error) ? `<div class="content-tab" id="tab-cl-${r.id}" onclick="showTab(${r.id},'cleaned')">🧹 クリーニング済み${r.cleaning_error ? ' ⚠️' : ''}</div>` : ''}
-            ${(r.ai_summary || r.summary_error) ? `<div class="content-tab" id="tab-su-${r.id}" onclick="showTab(${r.id},'summary')">✨ AI要約${r.summary_error ? ' ⚠️' : ''}</div>` : ''}
+            ${(r.transcript || r.transcript_error) ? `<div class="content-tab active" id="tab-tr-${r.id}" onclick="showTab(${r.id},'transcript')">📝 文字起こし${r.transcript_error ? ' ⚠️' : (r.transcript ? `<span class="char-count">(${r.transcript.length.toLocaleString()}文字)</span>` : '')}</div>` : ''}
+            ${(r.cleaned_transcript || r.cleaning_error) ? `<div class="content-tab" id="tab-cl-${r.id}" onclick="showTab(${r.id},'cleaned')">🧹 クリーニング済み${r.cleaning_error ? ' ⚠️' : (r.cleaned_transcript ? `<span class="char-count">(${r.cleaned_transcript.length.toLocaleString()}文字)</span>` : '')}</div>` : ''}
+            ${(r.ai_summary || r.summary_error) ? `<div class="content-tab" id="tab-su-${r.id}" onclick="showTab(${r.id},'summary')">✨ AI要約${r.summary_error ? ' ⚠️' : (r.ai_summary ? `<span class="char-count">(${r.ai_summary.length.toLocaleString()}文字)</span>` : '')}</div>` : ''}
           </div>
           ${(r.transcript || r.transcript_error) ? `
             <div class="content-panel active" id="panel-transcript-${r.id}">
@@ -1511,4 +1514,13 @@ function _showHistoryCardResult(recordId, data) {
 
   // スクロールして見える位置に
   item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// ── 文字数表示 ────────────────────────────────────
+function updateCharCount(elId, countId) {
+  const el = document.getElementById(elId);
+  const badge = document.getElementById(countId);
+  if(!el || !badge) return;
+  const len = el.textContent.length;
+  badge.textContent = len > 0 ? `(${len.toLocaleString()}文字)` : '';
 }
