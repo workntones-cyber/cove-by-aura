@@ -1383,19 +1383,111 @@ def llm_providers():
     return jsonify(get_all_providers()), 200
 
 
+_ollama_pull_status = {"status": "idle", "model": "", "message": "", "progress": 0}
+
+RECOMMENDED_MODELS = [
+    {
+        "name": "gemma4:e4b", "size": "約5GB", "desc": "最新世代・高速・推奨",
+        "min_ram": "8GB",  "min_vram": "6GB",
+        "note": "VRAM 8GB以上のGPUで全量GPU動作。現環境で最速の選択肢。",
+        "recommend": "◎",
+    },
+    {
+        "name": "gemma4:26b-a4b", "size": "約17GB", "desc": "最新世代・高性能MoE",
+        "min_ram": "32GB", "min_vram": "なし（RAM補完可）",
+        "note": "Mixture-of-Experts構造で実効パラメータは4B相当。gemma3:27bと同程度の速度。",
+        "recommend": "○",
+    },
+    {
+        "name": "gemma3:27b", "size": "約17GB", "desc": "高品質・日本語得意",
+        "min_ram": "32GB", "min_vram": "なし（RAM補完可）",
+        "note": "日本語精度が高く安定している。VRAM不足時はCPU補完で低速になる。",
+        "recommend": "○",
+    },
+    {
+        "name": "gemma3:12b", "size": "約8GB", "desc": "軽量・バランス型",
+        "min_ram": "16GB", "min_vram": "8GB",
+        "note": "VRAM 8GBに収まるため高速動作。精度はやや劣るが日常用途に十分。",
+        "recommend": "◎",
+    },
+    {
+        "name": "gemma4:31b", "size": "約20GB", "desc": "最新世代・最高性能Dense",
+        "min_ram": "32GB", "min_vram": "なし（RAM補完可）",
+        "note": "Dense構造で全パラメータが常時稼働。VRAM不足時は大幅に低速。M5 Max以降推奨。",
+        "recommend": "△",
+    },
+    {
+        "name": "llama3.3:70b", "size": "約40GB", "desc": "超高性能（高スペック専用）",
+        "min_ram": "64GB", "min_vram": "なし（RAM必須）",
+        "note": "64GB RAM環境でのみ動作可能。処理は非常に低速。M5 Max 64GB以上を推奨。",
+        "recommend": "△",
+    },
+]
+
 @app.route("/api/ollama/models", methods=["GET"])
 def ollama_models():
-    """Ollamaにインストール済みのモデル一覧を返す"""
-    import urllib.request
-    import json
+    """インストール済みモデル一覧と推奨モデルを返す"""
+    import urllib.request, json as _json2
+    installed = []
     try:
         req = urllib.request.Request("http://127.0.0.1:11434/api/tags")
         with urllib.request.urlopen(req, timeout=3) as res:
-            data = json.loads(res.read().decode("utf-8"))
-            models = [m["name"] for m in data.get("models", [])]
-            return jsonify({"status": "ok", "models": models}), 200
+            data = _json2.loads(res.read().decode("utf-8"))
+            installed = [m["name"] for m in data.get("models", [])]
     except Exception:
-        return jsonify({"status": "error", "models": []}), 200
+        pass
+    recommended = []
+    for m in RECOMMENDED_MODELS:
+        is_installed = any(m["name"] == i or m["name"] == i.split(":")[0] for i in installed)
+        recommended.append({**m, "installed": is_installed})
+    return jsonify({"status": "ok", "models": installed, "recommended": recommended}), 200
+
+
+@app.route("/api/ollama/pull", methods=["POST"])
+def ollama_pull():
+    """指定モデルをバックグラウンドでpullする"""
+    global _ollama_pull_status
+    data  = request.get_json(silent=True) or {}
+    model = data.get("model", "").strip()
+    if not model:
+        return jsonify({"status": "error", "message": "モデル名が必要です"}), 400
+    if _ollama_pull_status.get("status") == "running":
+        return jsonify({"status": "error", "message": "既にダウンロード中です"}), 400
+    _ollama_pull_status = {"status": "running", "model": model, "message": "ダウンロード開始…", "progress": 0}
+
+    def _pull():
+        global _ollama_pull_status
+        import subprocess, re as _re2
+        try:
+            proc = subprocess.Popen(
+                ["ollama", "pull", model],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, bufsize=1
+            )
+            for line in proc.stdout:
+                line = line.strip()
+                if not line: continue
+                _ollama_pull_status["message"] = line
+                m2 = _re2.search(r"(\d+)%", line)
+                if m2:
+                    _ollama_pull_status["progress"] = int(m2.group(1))
+            proc.wait()
+            if proc.returncode == 0:
+                _ollama_pull_status = {"status": "done", "model": model, "message": f"✅ {model} のインストールが完了しました", "progress": 100}
+            else:
+                _ollama_pull_status = {"status": "error", "model": model, "message": "ダウンロードに失敗しました", "progress": 0}
+        except Exception as e:
+            _ollama_pull_status = {"status": "error", "model": model, "message": str(e), "progress": 0}
+
+    import threading as _th2
+    _th2.Thread(target=_pull, daemon=True).start()
+    return jsonify({"status": "started"}), 200
+
+
+@app.route("/api/ollama/pull/status", methods=["GET"])
+def ollama_pull_status_api():
+    """pullの進捗を返す"""
+    return jsonify(_ollama_pull_status), 200
 
 @app.route("/api/ollama/status", methods=["GET"])
 def ollama_status():

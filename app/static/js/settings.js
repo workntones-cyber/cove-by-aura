@@ -496,13 +496,133 @@ async function loadOllamaModels(currentModel) {
     const data = await res.json();
     if (data.models && data.models.length > 0) {
       sel.innerHTML = data.models.map(m =>
-        `<option value="${m}" ${m === currentModel ? 'selected' : ''}>${getModelLabel(m)}</option>`
+        `<option value="${m}" ${m === currentModel ? 'selected' : ''}>${m}</option>`
       ).join('');
     } else {
       sel.innerHTML = `<option value="${currentModel}">${currentModel}</option>`;
     }
+    // 推奨モデル一覧を表示
+    if (data.recommended) {
+      renderRecommendedModels(data.recommended);
+    }
   } catch (e) {
     sel.innerHTML = `<option value="${currentModel}">${currentModel}</option>`;
+  }
+}
+
+// ── 推奨モデル一覧を描画 ──────────────────────────
+function renderRecommendedModels(models) {
+  const list = document.getElementById('recommendedModelList');
+  if (!list) return;
+  const recommendColor = { '◎': '#34D399', '○': '#7C6AF7', '△': '#EF9F27' };
+  list.innerHTML = models.map(m => `
+    <div style="padding:12px 14px;background:var(--bg);border-radius:10px;border:1px solid var(--border);">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+            <span style="font-size:13px;font-weight:700;color:var(--text);">${m.name}</span>
+            <span style="font-size:10px;color:var(--muted);background:var(--surface);padding:1px 6px;border-radius:4px;">${m.size}</span>
+            ${m.recommend ? `<span style="font-size:11px;font-weight:700;color:${recommendColor[m.recommend] || '#888'};">${m.recommend}</span>` : ''}
+          </div>
+          <div style="font-size:11px;color:var(--accent);margin-bottom:4px;">${m.desc}</div>
+          <div style="font-size:10px;color:var(--muted);line-height:1.5;">
+            <span style="margin-right:10px;">🖥 RAM: ${m.min_ram || '—'}</span>
+            <span>🎮 VRAM: ${m.min_vram || '—'}</span>
+          </div>
+          ${m.note ? `<div style="font-size:10px;color:var(--muted);margin-top:4px;line-height:1.5;opacity:0.8;">${m.note}</div>` : ''}
+        </div>
+        <div style="flex-shrink:0;margin-top:2px;">
+          ${m.installed
+            ? `<span style="font-size:11px;color:#34D399;font-weight:600;white-space:nowrap;">✅ 済み</span>`
+            : `<button onclick="installModel('${m.name}')"
+                style="font-size:11px;padding:5px 12px;border-radius:99px;border:1px solid var(--accent);
+                       background:rgba(124,106,247,.12);color:var(--accent);cursor:pointer;white-space:nowrap;">
+                📥 インストール
+               </button>`
+          }
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ── モデルインストール ────────────────────────────
+let _pullPollTimer = null;
+
+async function installModel(modelName) {
+  if (!confirm(`${modelName} をインストールしますか？\n\n※ダウンロード中は画面を閉じないでください。`)) return;
+
+  // 画面ロック
+  _lockSettingsPage(true, modelName);
+
+  const res = await fetch('/api/ollama/pull', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ model: modelName }),
+  });
+  const data = await res.json();
+  if (data.status !== 'started') {
+    alert(data.message || 'インストール開始に失敗しました');
+    _lockSettingsPage(false);
+    return;
+  }
+
+  // 進捗ポーリング
+  _pullPollTimer = setInterval(async () => {
+    try {
+      const pr = await fetch('/api/ollama/pull/status');
+      const pd = await pr.json();
+      document.getElementById('pullMessage').textContent = pd.message || '';
+      document.getElementById('pullProgressBar').style.width = (pd.progress || 0) + '%';
+
+      if (pd.status === 'done') {
+        clearInterval(_pullPollTimer);
+        closeModelModal();
+        _lockSettingsPage(false);
+        alert(`✅ ${modelName} のインストールが完了しました！`);
+        // モデル選択肢を更新して自動選択
+        await loadOllamaModels(modelName);
+        // 設定に反映
+        const sel = document.getElementById('ollamaModelSelect');
+        if (sel) sel.value = modelName;
+      } else if (pd.status === 'error') {
+        clearInterval(_pullPollTimer);
+        _lockSettingsPage(false);
+        alert('❌ インストールに失敗しました: ' + pd.message);
+      }
+    } catch(e) {}
+  }, 2000);
+}
+
+// ── 設定画面のロック/解除 ────────────────────────
+function _lockSettingsPage(lock, modelName = '') {
+  const pullArea   = document.getElementById('pullProgressArea');
+  const pullName   = document.getElementById('pullModelName');
+  const pullBar    = document.getElementById('pullProgressBar');
+  const pullMsg    = document.getElementById('pullMessage');
+
+  if(lock) {
+    if(pullArea) { pullArea.style.display = 'block'; }
+    if(pullName) pullName.textContent = modelName;
+    if(pullBar)  pullBar.style.width = '0%';
+    if(pullMsg)  pullMsg.textContent = 'ダウンロード開始…';
+    // 保存ボタンを無効化
+    const saveBtn = document.getElementById('saveBtn');
+    if(saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.4'; }
+    // ページ離脱を警告
+    window._pullBeforeUnload = (e) => {
+      e.preventDefault();
+      e.returnValue = 'ダウンロード中です。ページを閉じると中断されます。';
+    };
+    window.addEventListener('beforeunload', window._pullBeforeUnload);
+  } else {
+    if(pullArea) pullArea.style.display = 'none';
+    const saveBtn = document.getElementById('saveBtn');
+    if(saveBtn) { saveBtn.disabled = false; saveBtn.style.opacity = ''; }
+    if(window._pullBeforeUnload) {
+      window.removeEventListener('beforeunload', window._pullBeforeUnload);
+      window._pullBeforeUnload = null;
+    }
   }
 }
 
@@ -1341,3 +1461,32 @@ async function loadRamOptions(currentMinutes) {
     sel.innerHTML = `<option value="${currentMinutes}">${currentMinutes}分（目安）</option>`;
   }
 }
+
+
+// ── 推奨モデルポップアップ ────────────────────────
+async function openModelModal() {
+  const modal = document.getElementById('modelModal');
+  if(!modal) return;
+  modal.style.display = 'flex';
+  // モデル一覧を最新取得
+  const list = document.getElementById('recommendedModelList');
+  if(list) list.innerHTML = '<div style="font-size:11px;color:var(--muted);">読み込み中…</div>';
+  try {
+    const res  = await fetch('/api/ollama/models');
+    const data = await res.json();
+    if(data.recommended) renderRecommendedModels(data.recommended);
+  } catch(e) {
+    if(list) list.innerHTML = '<div style="font-size:11px;color:#E24B4A;">取得に失敗しました</div>';
+  }
+}
+
+function closeModelModal() {
+  const modal = document.getElementById('modelModal');
+  if(modal) modal.style.display = 'none';
+}
+
+// モーダル外クリックで閉じる
+document.addEventListener('click', (e) => {
+  const modal = document.getElementById('modelModal');
+  if(modal && e.target === modal) closeModelModal();
+});

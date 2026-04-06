@@ -225,6 +225,55 @@ async function runTranscribe(recordId) {
   [step1, step2, step3].forEach(s => { if(s) s.classList.remove('error'); });
   step1.classList.add('active');
 
+  // ── ポーリングで中間結果を随時表示 ──
+  let _pollTimer = setInterval(async () => {
+    try {
+      const pr = await fetch('/api/transcribe/progress');
+      const pd = await pr.json();
+      if(pd.record_id !== recordId) return;
+
+      const step = pd.step || '';
+
+      // 文字起こし完了 → step1完了・結果表示
+      if((step === 'transcribe_done' || step === 'cleaning' || step === 'cleaning_done' || step === 'summarizing' || step === 'done') && !step1.classList.contains('done')) {
+        step1.classList.remove('active'); step1.classList.add('done');
+        step1.querySelector('.step-icon').textContent = '✓';
+        step1.querySelector('span').textContent = '文字起こし完了';
+        if(pd.transcript) {
+          document.getElementById('transcriptBody').textContent = pd.transcript;
+          updateCharCount('transcriptBody', 'countTranscript');
+          document.getElementById('resultSection').classList.add('visible');
+          // 文字起こしタブに切り替え
+          switchResultTab('transcript', document.querySelector('.result-tab'));
+        }
+        if(step2) { step2.classList.add('active'); step2.querySelector('span').textContent = 'クリーニング中...'; }
+      }
+
+      // クリーニング完了 → step2完了・結果表示
+      if((step === 'cleaning_done' || step === 'summarizing' || step === 'done') && step2 && !step2.classList.contains('done')) {
+        step2.classList.remove('active'); step2.classList.add('done');
+        step2.querySelector('.step-icon').textContent = '✓';
+        step2.querySelector('span').textContent = 'クリーニング完了';
+        if(pd.cleaned_transcript) {
+          document.getElementById('cleanedBody').textContent = pd.cleaned_transcript;
+          updateCharCount('cleanedBody', 'countCleaned');
+          document.getElementById('resultSection').classList.add('visible');
+        }
+        if(step3) { step3.classList.add('active'); step3.querySelector('span').textContent = '要約中...'; }
+      }
+
+      // 要約中
+      if(step === 'summarizing' && step3 && !step3.classList.contains('done')) {
+        if(!step3.classList.contains('active')) step3.classList.add('active');
+        step3.querySelector('span').textContent = pd.message || '要約中...';
+      }
+
+      if(pd.status === 'done' || pd.status === 'error') {
+        clearInterval(_pollTimer);
+      }
+    } catch(e) {}
+  }, 1500);
+
   let data;
   try {
     const res = await fetch('/api/transcribe', {
@@ -234,9 +283,11 @@ async function runTranscribe(recordId) {
     });
     data = await res.json();
   } catch (e) {
+    clearInterval(_pollTimer);
     showTranscribeError('ネットワークエラーが発生しました。サーバーが起動しているか確認してください。');
     return;
   }
+  clearInterval(_pollTimer);
 
   if (data.status === 'error') {
     showTranscribeError(data.message || 'エラーが発生しました。');
@@ -244,33 +295,18 @@ async function runTranscribe(recordId) {
     return;
   }
 
-  // step1 完了
-  step1.classList.remove('active'); step1.classList.add('done');
-  step1.querySelector('.step-icon').textContent = '✓';
+  // 全完了 → 各stepを確実にdoneにして最終結果を表示
+  [step1, step2, step3].forEach(s => {
+    if(!s) return;
+    s.classList.remove('active'); s.classList.add('done');
+    s.querySelector('.step-icon').textContent = '✓';
+  });
   step1.querySelector('span').textContent = '文字起こし完了';
-
-  // step2 クリーニング
-  if (step2) {
-    step2.classList.add('active');
-    step2.querySelector('span').textContent = 'クリーニング中...';
-    await new Promise(r => setTimeout(r, 300));
-    step2.classList.remove('active'); step2.classList.add('done');
-    step2.querySelector('.step-icon').textContent = '✓';
-    step2.querySelector('span').textContent = 'クリーニング完了';
-  }
-
-  // step3 要約
-  if (step3) {
-    step3.classList.add('active');
-    await new Promise(r => setTimeout(r, 300));
-    step3.classList.remove('active'); step3.classList.add('done');
-    step3.querySelector('.step-icon').textContent = '✓';
-    step3.querySelector('span').textContent = 'AI要約完了';
-  }
+  if(step2) step2.querySelector('span').textContent = 'クリーニング完了';
+  if(step3) step3.querySelector('span').textContent = 'AI要約完了';
 
   document.getElementById('transcriptBody').textContent = data.transcript;
   document.getElementById('cleanedBody').textContent    = data.cleaned_transcript || '';
-  // 要約エラーがあればエラーメッセージ＋前回の要約を表示
   const summaryEl = document.getElementById('summaryBody');
   if (data.summary_error) {
     summaryEl.innerHTML = `<div style="color:#E24B4A;font-size:12px;margin-bottom:8px;padding:8px 10px;background:rgba(226,75,74,.08);border-radius:6px;border-left:3px solid #E24B4A;">⚠️ ${data.summary_error}</div>${data.ai_summary ? `<div>${data.ai_summary}</div>` : ''}`;
@@ -1231,11 +1267,25 @@ function startProgressPolling(recordId) {
       const elapsed = data.elapsed || 0;
       showProgressBar(recordId, data.message || '', data.progress || 0, elapsed);
 
-      // 文字起こし完了時点で随時タブに表示
+      // 文字起こし完了時点で随時タブに表示・タブ名にチェックを追加
       if(data.transcript) {
         const el = document.getElementById(`panel-transcript-${recordId}`);
         if(el && !el.querySelector('.history-content')) {
           el.innerHTML = `<div class="history-content">${escHtml(data.transcript)}</div>`;
+          // タブに完了マーク
+          const tab = document.getElementById(`tab-tr-${recordId}`);
+          if(tab && !tab.dataset.done) {
+            tab.dataset.done = '1';
+            tab.innerHTML = `✅ 📝 文字起こし完了 <span class="char-count">(${data.transcript.length.toLocaleString()}文字)</span>`;
+          }
+          // カードを開く
+          const item = document.getElementById(`history-${recordId}`);
+          if(item && !item.classList.contains('open')) {
+            const detail = item.querySelector('.history-detail');
+            if(detail) { item.classList.add('open'); detail.style.display = 'block'; }
+          }
+          // 文字起こしタブをアクティブに
+          showTab(recordId, 'transcript');
         }
       }
       // クリーニング完了時点で随時タブに表示
@@ -1243,12 +1293,20 @@ function startProgressPolling(recordId) {
         const el = document.getElementById(`panel-cleaned-${recordId}`);
         if(el && !el.querySelector('.history-content')) {
           el.innerHTML = `<div class="history-content">${escHtml(data.cleaned_transcript)}</div>`;
-        }
-        // カードを開いて表示
-        const item = document.getElementById(`history-${recordId}`);
-        if(item && !item.classList.contains('open')) {
-          const detail = item.querySelector('.history-detail');
-          if(detail) { item.classList.add('open'); detail.style.display = 'block'; }
+          // タブに完了マーク
+          const tab = document.getElementById(`tab-cl-${recordId}`);
+          if(tab && !tab.dataset.done) {
+            tab.dataset.done = '1';
+            tab.innerHTML = `✅ 🧹 クリーニング完了 <span class="char-count">(${data.cleaned_transcript.length.toLocaleString()}文字)</span>`;
+          }
+          // カードを開く
+          const item = document.getElementById(`history-${recordId}`);
+          if(item && !item.classList.contains('open')) {
+            const detail = item.querySelector('.history-detail');
+            if(detail) { item.classList.add('open'); detail.style.display = 'block'; }
+          }
+          // クリーニングタブをアクティブに
+          showTab(recordId, 'cleaned');
         }
       }
 
@@ -1491,15 +1549,20 @@ function _showHistoryCardResult(recordId, data) {
   if (data.transcript) {
     const el = document.getElementById(`panel-transcript-${recordId}`);
     if (el) el.innerHTML = `<div class="history-content">${escHtml(data.transcript)}</div>`;
-    document.getElementById(`tab-tr-${recordId}`)?.classList.add('active');
+    const tab = document.getElementById(`tab-tr-${recordId}`);
+    if(tab) tab.innerHTML = `✅ 📝 文字起こし完了 <span class="char-count">(${data.transcript.length.toLocaleString()}文字)</span>`;
   }
   if (data.cleaned_transcript) {
     const el = document.getElementById(`panel-cleaned-${recordId}`);
     if (el) el.innerHTML = `<div class="history-content">${escHtml(data.cleaned_transcript)}</div>`;
+    const tab = document.getElementById(`tab-cl-${recordId}`);
+    if(tab) tab.innerHTML = `✅ 🧹 クリーニング完了 <span class="char-count">(${data.cleaned_transcript.length.toLocaleString()}文字)</span>`;
   }
   if (data.ai_summary) {
     const el = document.getElementById(`panel-summary-${recordId}`);
     if (el) el.innerHTML = `<div class="history-content">${escHtml(data.ai_summary)}</div>`;
+    const tab = document.getElementById(`tab-su-${recordId}`);
+    if(tab) tab.innerHTML = `✅ ✨ AI要約完了 <span class="char-count">(${data.ai_summary.length.toLocaleString()}文字)</span>`;
   }
 
   // 先頭タブをアクティブに

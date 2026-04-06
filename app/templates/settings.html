@@ -31,7 +31,7 @@
 
     /* ── AIモード枠：完全固定高さ ── */
     #aiModeCard {
-      height: 680px;        /* 最大パターン（クラウド固有APIキーあり）に合わせた固定値 */
+      height: 690px;        /* 最大パターン（クラウド固有APIキーあり）に合わせた固定値 */
       overflow-y: hidden;
       display: flex;
       flex-direction: column;
@@ -218,17 +218,31 @@
       <!-- Ollamaモデル設定（ローカル選択時のみ表示） -->
       <div id="ollamaModelInline" style="display:none;margin-top:14px;">
         <div style="font-size:12px;color:var(--muted);margin-bottom:8px;line-height:1.6;">
-          要約に使用するモデルを選択してください。モデルが大きいほど精度が上がりますが処理時間が増えます。<br>
-          モデルは事前に <code style="color:#9CA3AF;">ollama pull モデル名</code> でダウンロードが必要です。
+          要約に使用するモデルを選択してください。モデルが大きいほど精度が上がりますが処理時間が増えます。
         </div>
-        <select class="api-key-input" id="ollamaModelSelect" style="cursor:pointer;">
-          <option value="llama3.1:8b">llama3.1:8b（約5GB・標準）</option>
-          <option value="gemma3:27b">gemma3:27b（約17GB・高品質・日本語得意）</option>
-          <option value="llama3.3:70b">llama3.3:70b（約40GB・最高品質 ※要ダウンロード）</option>
-        </select>
+
+        <!-- インストール済みモデル選択 + 推奨モデルボタン -->
+        <div style="display:flex;align-items:center;gap:8px;">
+          <select class="api-key-input" id="ollamaModelSelect" style="cursor:pointer;flex:1;margin-bottom:0;">
+            <option value="gemma3:27b">gemma3:27b</option>
+          </select>
+          <button onclick="openModelModal()" style="flex-shrink:0;font-size:11px;padding:6px 12px;border-radius:99px;border:1px solid var(--accent);background:rgba(124,106,247,.12);color:var(--accent);cursor:pointer;white-space:nowrap;">
+            📦 推奨モデルの確認・インストール
+          </button>
+        </div>
         <p style="font-size:11px;color:var(--muted);margin-top:4px;">
-          ⚠️ 選択したモデルが未ダウンロードの場合はエラーになります。変更後は「設定を保存」してください。
+          変更後は「設定を保存」してください。
         </p>
+
+        <!-- ダウンロード進捗（モデル枠内・ロック中のみ表示） -->
+        <div id="pullProgressArea" style="display:none;margin-top:12px;padding:10px 12px;background:rgba(124,106,247,.08);border-radius:8px;border:1px solid rgba(124,106,247,.2);">
+          <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:6px;">📥 <span id="pullModelName"></span> をダウンロード中…</div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:6px;" id="pullMessage">ダウンロード開始…</div>
+          <div style="background:#1a1a2e;border-radius:4px;height:6px;overflow:hidden;">
+            <div id="pullProgressBar" style="height:100%;background:linear-gradient(90deg,#7C6AF7,#5B4AF7);border-radius:4px;width:0%;transition:width .4s;"></div>
+          </div>
+          <div style="font-size:10px;color:#E24B4A;margin-top:6px;">⚠️ ダウンロード中はこの画面を閉じないでください</div>
+        </div>
 
         <!-- 録音時間設定 -->
         <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);">
@@ -712,5 +726,20 @@ window.addEventListener('pagehide', () => {
   } catch(e) {}
 })();
 </script>
+
+<!-- 推奨モデルポップアップ -->
+<div id="modelModal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);align-items:center;justify-content:center;">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:24px;width:480px;max-width:90vw;max-height:80vh;display:flex;flex-direction:column;gap:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);">
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <div style="font-size:16px;font-weight:700;color:var(--text);">📦 推奨モデル</div>
+      <button onclick="closeModelModal()" style="background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;line-height:1;">✕</button>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-top:-8px;">インストールしたいモデルの「📥 インストール」ボタンを押してください。</div>
+    <div id="recommendedModelList" style="display:flex;flex-direction:column;gap:8px;overflow-y:auto;max-height:50vh;">
+      <div style="font-size:11px;color:var(--muted);">読み込み中…</div>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
