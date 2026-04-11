@@ -5,9 +5,14 @@ from pathlib import Path
 
 # ── データベースファイルのパス ──────────────────────
 if getattr(sys, "frozen", False):
-    DB_PATH = Path(sys.executable).resolve().parent / "app" / "cove.db"
+    # PyInstaller実行時: exe と同じフォルダに cove.db を配置
+    _base = Path(sys.executable).resolve().parent
+    DB_PATH = _base / "cove.db"
 else:
     DB_PATH = Path(__file__).resolve().parent / "cove.db"
+
+# DBファイルの親ディレクトリが存在しない場合は作成
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 
 def get_connection() -> sqlite3.Connection:

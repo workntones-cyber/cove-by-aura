@@ -398,6 +398,43 @@ def disk_status():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/system/ram", methods=["GET"])
+def system_ram():
+    """利用可能なRAM情報を返す"""
+    try:
+        import psutil
+        mem = psutil.virtual_memory()
+        total_gb  = mem.total / (1024 ** 3)
+        usable_gb = round(total_gb * 0.8, 1)
+
+        ctx_table = [
+            {"minutes": 30,  "num_ctx": 16384,  "required_gb": 8.0},
+            {"minutes": 60,  "num_ctx": 32768,  "required_gb": 16.0},
+            {"minutes": 90,  "num_ctx": 65536,  "required_gb": 32.0},
+            {"minutes": 120, "num_ctx": 131072, "required_gb": 56.0},
+        ]
+        options = [e for e in ctx_table if e["required_gb"] <= usable_gb]
+        if not options:
+            options = [ctx_table[0]]
+
+        return jsonify({
+            "total_gb":  round(total_gb, 1),
+            "avail_gb":  round(mem.available / (1024 ** 3), 1),
+            "usable_gb": usable_gb,
+            "options":   options,
+        }), 200
+    except ImportError:
+        return jsonify({
+            "total_gb": 0, "avail_gb": 0, "usable_gb": 0,
+            "options": [
+                {"minutes": 30,  "num_ctx": 16384,  "required_gb": 8.0},
+                {"minutes": 60,  "num_ctx": 32768,  "required_gb": 16.0},
+            ],
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/help")
 def help_page():
     return render_template("help.html")
