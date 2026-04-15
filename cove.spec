@@ -19,9 +19,14 @@ a = Analysis(
         # アプリケーションモジュール
         ('app/database.py',      'app'),
         ('app/services',         'app/services'),
-        ('app/services/llm',     'app/services/llm'),
+        # llm/配下の.pyファイルをファイルとしても同梱（動的スキャン用）
+        ('app/services/llm/*.py', 'app/services/llm'),
+        # faster-whisper アセット（silero VADモデル等）
+        (str(Path(__import__('faster_whisper').__file__).parent / 'assets'), 'faster_whisper/assets'),
         # アイコン（PyInstaller用）
         ('cove.ico',             '.'),
+        # デフォルト設定ファイル（初回起動時に.envが存在しない場合のテンプレート）
+        ('env.example',          '.'),
     ],
     hiddenimports=[
         # Flask関連
@@ -42,6 +47,13 @@ a = Analysis(
         'numpy',
         # DB
         'sqlite3',
+        # クラウドLLMプロバイダー（llm/配下で遅延importのため明示指定）
+        'anthropic',
+        'groq',
+        'openai',
+        'google.genai',
+        # 画像処理（ペルソナアイコンアップロードで使用）
+        'PIL.Image',
         # その他
         'requests',
         'urllib',
@@ -53,11 +65,6 @@ a = Analysis(
         're',
         'subprocess',
         'psutil',
-        # クラウドAI
-        'groq',
-        'anthropic',
-        'openai',
-        'google.generativeai',
     ],
     hookspath=[],
     hooksconfig={},
@@ -66,7 +73,6 @@ a = Analysis(
         # 不要なもの
         'tkinter',
         'matplotlib',
-        'PIL',
         'cv2',
         'scipy',
         'pandas',

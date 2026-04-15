@@ -5,9 +5,9 @@ from pathlib import Path
 
 # ── データベースファイルのパス ──────────────────────
 if getattr(sys, "frozen", False):
-    # PyInstaller実行時: exe と同じフォルダに cove.db を配置
-    _base = Path(sys.executable).resolve().parent
-    DB_PATH = _base / "cove.db"
+    # PyInstaller実行時: dist/COVE/COVE.exe → 3階層上がプロジェクトルート
+    _project_root = Path(sys.executable).resolve().parent.parent.parent
+    DB_PATH = _project_root / "app" / "cove.db"
 else:
     DB_PATH = Path(__file__).resolve().parent / "cove.db"
 

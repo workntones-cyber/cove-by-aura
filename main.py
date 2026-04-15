@@ -64,9 +64,9 @@ from app.services.recorder import get_status, list_recordings, start, stop
 # --onefile で固めた場合、リソースは一時展開ディレクトリに置かれる
 # 通常実行時は main.py のある場所をベースにする
 if getattr(sys, "frozen", False):
-    # PyInstallerで固めた実行ファイルとして起動している
-    BASE_DIR = Path(sys.executable).resolve().parent
-    RESOURCE_DIR = Path(sys._MEIPASS)  # 一時展開ディレクトリ
+    # PyInstaller実行時: dist/COVE/COVE.exe → 3階層上がプロジェクトルート
+    BASE_DIR     = Path(sys.executable).resolve().parent.parent.parent
+    RESOURCE_DIR = Path(sys._MEIPASS)  # テンプレート・静的ファイルは_internal配下
 else:
     # 通常のPython実行
     BASE_DIR     = Path(__file__).resolve().parent
@@ -1250,10 +1250,7 @@ def recordings_delete_all():
 #  音声ファイル配信 API
 # ══════════════════════════════════════════════════
 
-if getattr(sys, "frozen", False):
-    UPLOADS_DIR = Path(sys.executable).resolve().parent / "uploads"
-else:
-    UPLOADS_DIR = Path(__file__).resolve().parent / "uploads"
+UPLOADS_DIR = BASE_DIR / "uploads"
 
 @app.route("/api/audio/<filename>")
 def serve_audio(filename):
@@ -1303,11 +1300,7 @@ def get_devices():
 #  設定 API
 # ══════════════════════════════════════════════════
 
-# PyInstaller frozen 対応
-if getattr(sys, "frozen", False):
-    ENV_PATH = Path(sys.executable).resolve().parent / ".env"
-else:
-    ENV_PATH = Path(__file__).resolve().parent / ".env"
+ENV_PATH = BASE_DIR / ".env"
 # 起動時に .env が存在しない場合は空ファイルを作成
 if not ENV_PATH.exists():
     ENV_PATH.write_text("AI_MODE=personal\nRECORDING_SOURCE=mic\n", encoding="utf-8")
@@ -2189,7 +2182,7 @@ def personas_icon_upload(persona_name: str):
     if size > 2 * 1024 * 1024:
         return jsonify({"status": "error", "message": "ファイルサイズは2MB以内にしてください"}), 400
 
-    icon_dir = RESOURCE_DIR / "app" / "static" / "img" / "personas" / "custom"
+    icon_dir = BASE_DIR / "app" / "static" / "img" / "personas" / "custom"
     icon_dir.mkdir(parents=True, exist_ok=True)
 
     import hashlib
@@ -2215,7 +2208,7 @@ def personas_icon_delete(persona_name: str):
     import hashlib
     safe_name = hashlib.md5(persona_name.encode()).hexdigest()
     variant   = request.args.get("variant", "all")
-    icon_dir  = RESOURCE_DIR / "app" / "static" / "img" / "personas" / "custom"
+    icon_dir  = BASE_DIR / "app" / "static" / "img" / "personas" / "custom"
 
     if variant == "all":
         for v in ("wait", "think"):
@@ -2233,7 +2226,7 @@ def personas_icon_get(persona_name: str):
     """ペルソナのカスタムアイコンURL（wait/think両方）を返す"""
     import hashlib
     safe_name = hashlib.md5(persona_name.encode()).hexdigest()
-    icon_dir  = RESOURCE_DIR / "app" / "static" / "img" / "personas" / "custom"
+    icon_dir  = BASE_DIR / "app" / "static" / "img" / "personas" / "custom"
     result    = {}
     for v in ("wait", "think"):
         p = icon_dir / f"{safe_name}_{v}.png"

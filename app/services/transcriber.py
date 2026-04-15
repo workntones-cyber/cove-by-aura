@@ -17,8 +17,19 @@ from pathlib import Path
 # ── 設定 ──────────────────────────────────────────
 import sys as _sys
 if getattr(_sys, "frozen", False):
-    UPLOADS_DIR = Path(_sys.executable).resolve().parent / "uploads"
-    ENV_PATH    = Path(_sys.executable).resolve().parent / ".env"
+    # PyInstaller実行時: dist/COVE/COVE.exe → 3階層上がプロジェクトルート
+    _project_root = Path(_sys.executable).resolve().parent.parent.parent
+    UPLOADS_DIR = _project_root / "uploads"
+    ENV_PATH    = _project_root / ".env"
+    # VADモデルパス
+    import os as _os
+    _vad_path = Path(_sys.executable).resolve().parent / "_internal" / "faster_whisper" / "assets" / "silero_vad_v6.onnx"
+    if _vad_path.exists():
+        try:
+            import faster_whisper
+            faster_whisper.vad._ASSETS_ROOT = str(_vad_path.parent)
+        except Exception:
+            pass
 else:
     UPLOADS_DIR = Path(__file__).resolve().parent.parent.parent / "uploads"
     ENV_PATH    = Path(__file__).resolve().parent.parent.parent / ".env"
