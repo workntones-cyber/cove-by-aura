@@ -403,11 +403,12 @@ async function checkBlackHole() {
   if (!isMac) return;
 
   try {
-    // 設定を取得してシステム音声モードか確認
+    // 設定を取得して system / both モードか確認
     const settingsRes = await fetch('/api/settings');
     const settings    = await settingsRes.json();
-    const isSystemAudio = settings.recording_device_id !== "";
-    if (!isSystemAudio) return;
+    const needsBlackHole = settings.recording_source === 'system' ||
+                           settings.recording_source === 'both';
+    if (!needsBlackHole) return;
 
     // デバイス一覧を取得してBlackHoleが存在するか確認
     const devRes  = await fetch('/api/devices');
@@ -1047,7 +1048,7 @@ async function updateSettingsBadge() {
     const res      = await fetch('/api/settings');
     const settings = await res.json();
 
-    const isSystem  = settings.recording_source === 'system';
+    const recSource = settings.recording_source || 'mic';
     const isLocal   = settings.ai_mode === 'ollama';
     const modeLabels = {
       ollama: '🏠 Ollama（完全ローカル）',
@@ -1058,12 +1059,21 @@ async function updateSettingsBadge() {
     };
     const modeLabel = modeLabels[settings.ai_mode] || settings.ai_mode;
 
+    const recSourceMeta = {
+      mic:    { badge: '🎤 マイク入力',           icon: '⚠️', text: 'オンライン会議の相手の声は録音されません' },
+      system: { badge: '🖥️ システム音声',          icon: '🔊', text: 'PCのすべての音声を録音します（相手の声のみ）' },
+      both:   { badge: '🎤🖥️ マイク＋システム音声', icon: '🔊', text: '自分と相手の声を両方録音します' },
+    };
+    const recMeta = recSourceMeta[recSource] || recSourceMeta['mic'];
+
     const rows = [
       {
-        badgeClass: isSystem ? 'settings-badge settings-badge-system' : 'settings-badge',
-        badgeText:  isSystem ? '🖥️ システム音声' : '🎤 マイク入力',
-        noticeIcon: isSystem ? '🔊' : '⚠️',
-        noticeText: isSystem ? 'PCのすべての音声を録音します' : 'オンライン会議の音声は録音されません',
+        badgeClass: (recSource === 'system' || recSource === 'both')
+          ? 'settings-badge settings-badge-system'
+          : 'settings-badge',
+        badgeText:  recMeta.badge,
+        noticeIcon: recMeta.icon,
+        noticeText: recMeta.text,
       },
       {
         badgeClass: isLocal ? 'settings-badge settings-badge-business' : 'settings-badge',
@@ -1508,7 +1518,7 @@ async function checkOllama() {
   try {
     const settingsRes = await fetch('/api/settings');
     const settings    = await settingsRes.json();
-    if (settings.ai_mode !== 'business') return;
+    if (settings.ai_mode !== 'ollama') return;
 
     const res  = await fetch('/api/ollama/status');
     const data = await res.json();

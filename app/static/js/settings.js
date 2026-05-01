@@ -740,7 +740,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ── 録音ソース切替 ───────────────────────────────
-let currentRecSource = 'system';
+let currentRecSource = 'mic';
 
 function selectRecSource(source, loadDev = true) {
   currentRecSource = source;
@@ -749,7 +749,7 @@ function selectRecSource(source, loadDev = true) {
   document.getElementById(`src-${source}`)?.classList.add('selected');
 
   const area = document.getElementById('deviceSelectArea');
-  if (source === 'system') {
+  if (source === 'system' || source === 'both') {
     area.classList.add('visible');
     const isMac = navigator.platform.toUpperCase().includes('MAC') ||
                   navigator.userAgent.includes('Mac');

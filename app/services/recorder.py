@@ -5,6 +5,7 @@ recorder.py
 録音ソースに応じて以下を切り替える：
   - mic    : sounddevice（マイク入力）
   - system : soundcard WASAPI ループバック（システム音声・追加設定不要）
+  - both   : マイク＋システム音声の同時録音（ミックス）
 """
 
 import os
@@ -124,7 +125,6 @@ def _sd_callback(indata, frames, time, status):
             _chunk_index += 1
             _frames       = []
             _frame_count  = 0
-
 
 
 # ── BlackHole ループバック録音スレッド（Mac） ─────
@@ -299,6 +299,184 @@ def _soundcard_record_thread():
         _recording = False
 
 
+# ── マイクのみ録音（bothのフォールバック） ────────
+def _mic_record_thread_fallback() -> None:
+    """pyaudiowpatch が使えない場合のマイクのみ録音"""
+    import sounddevice as sd
+    global _recording, _frames, _frame_count, _chunk_index
+    device_id = _get_device_id()
+    stream = sd.InputStream(
+        device=device_id, samplerate=SAMPLE_RATE,
+        channels=CHANNELS, dtype=DTYPE, callback=_sd_callback,
+    )
+    stream.start()
+    while _recording:
+        import time; time.sleep(0.1)
+    stream.stop()
+    stream.close()
+
+
+# ── マイク＋システム音声 同時録音スレッド（Windows） ──
+def _both_record_thread() -> None:
+    """
+    マイク入力とWASAPIシステム音声を同時録音してミックスする。
+    両ストリームを同時に開き、numpy でミックスして _frames に追加する。
+    """
+    global _recording, _frames, _frame_count, _chunk_index
+
+    import numpy as np
+
+    try:
+        import pyaudiowpatch as pyaudio
+    except ImportError:
+        print("[recorder] pyaudiowpatch 未インストール。マイクのみにフォールバック")
+        _mic_record_thread_fallback()
+        return
+
+    import sounddevice as sd
+
+    pa = pyaudio.PyAudio()
+
+    # WASAPIループバックデバイスを取得（デフォルト再生デバイス優先）
+    wasapi_info      = pa.get_host_api_info_by_type(pyaudio.paWASAPI)
+    default_speakers = pa.get_device_info_by_index(wasapi_info["defaultOutputDevice"])
+    virtual_keywords = ["vb-audio", "cable", "virtual", "voicemeeter"]
+    loopback_dev     = None
+
+    # ① デフォルト再生デバイスのループバックを探す（最優先）
+    for i in range(pa.get_device_count()):
+        dev = pa.get_device_info_by_index(i)
+        if dev.get("hostApi") == wasapi_info["index"] and dev.get("isLoopbackDevice", False):
+            if default_speakers["name"] in dev["name"]:
+                dev["index"] = i
+                loopback_dev = dev
+                break
+
+    # ② 見つからない場合は実デバイス優先でフォールバック
+    if loopback_dev is None:
+        for i in range(pa.get_device_count()):
+            dev = pa.get_device_info_by_index(i)
+            if dev.get("hostApi") == wasapi_info["index"] and dev.get("isLoopbackDevice", False):
+                dev["index"] = i
+                name_lower   = dev["name"].lower()
+                is_virtual   = any(kw in name_lower for kw in virtual_keywords)
+                if loopback_dev is None:
+                    loopback_dev = dev
+                elif any(kw in loopback_dev["name"].lower() for kw in virtual_keywords) and not is_virtual:
+                    loopback_dev = dev
+
+    if loopback_dev is None:
+        print("[recorder] WASAPIデバイスが見つかりません。マイクのみ録音します")
+        _mic_record_thread_fallback()
+        pa.terminate()
+        return
+
+    sys_samplerate = int(loopback_dev["defaultSampleRate"])
+    sys_channels   = int(loopback_dev["maxInputChannels"])
+    chunk_size     = int(sys_samplerate * 0.1)  # 100msチャンク
+
+    print(f"[recorder] 同時録音開始: マイク＋{loopback_dev['name']}")
+
+    # バッファ
+    mic_buf  = []
+    mic_lock = threading.Lock()
+
+    # マイクコールバック
+    def mic_cb(indata, frames, time, status):
+        with mic_lock:
+            mic_buf.append(indata.copy())
+
+    # システム音声ストリーム
+    sys_stream = pa.open(
+        format=pyaudio.paInt16,
+        channels=sys_channels,
+        rate=sys_samplerate,
+        input=True,
+        input_device_index=loopback_dev["index"],
+        frames_per_buffer=chunk_size,
+    )
+
+    device_id = _get_device_id()
+    mic_stream = sd.InputStream(
+        device=device_id,
+        samplerate=SAMPLE_RATE,
+        channels=CHANNELS,
+        dtype=DTYPE,
+        callback=mic_cb,
+        blocksize=int(SAMPLE_RATE * 0.1),
+    )
+
+    sys_stream.start_stream()
+    mic_stream.start()
+
+    try:
+        while _recording:
+            # システム音声を読み込み
+            raw = sys_stream.read(chunk_size, exception_on_overflow=False)
+            sys_arr = np.frombuffer(raw, dtype=np.int16)
+            if sys_arr.ndim == 0 or sys_arr.size == 0:
+                continue
+
+            # ステレオ→モノラル変換
+            if sys_channels > 1:
+                try:
+                    sys_arr = sys_arr.reshape(-1, sys_channels).mean(axis=1).astype(np.int16)
+                except Exception:
+                    continue
+
+            # サンプルレート変換（16000Hzに統一）
+            if sys_samplerate != SAMPLE_RATE and len(sys_arr) > 0:
+                ratio   = SAMPLE_RATE / sys_samplerate
+                new_len = max(1, int(len(sys_arr) * ratio))
+                indices = np.linspace(0, len(sys_arr) - 1, new_len)
+                sys_arr = np.interp(indices, np.arange(len(sys_arr)), sys_arr).astype(np.int16)
+
+            if len(sys_arr) == 0:
+                continue
+
+            # マイクバッファを取得
+            with mic_lock:
+                valid = [a for a in mic_buf if isinstance(a, np.ndarray) and a.ndim > 0 and a.size > 0]
+                mic_buf.clear()
+
+            if valid:
+                try:
+                    mic_arr = np.concatenate([a.flatten() for a in valid]).astype(np.int16)
+                except Exception:
+                    mic_arr = np.zeros(len(sys_arr), dtype=np.int16)
+            else:
+                mic_arr = np.zeros(len(sys_arr), dtype=np.int16)
+
+            # 長さを揃えてミックス
+            min_len = min(len(sys_arr), len(mic_arr))
+            if min_len == 0:
+                continue
+            sys_arr = sys_arr[:min_len]
+            mic_arr = mic_arr[:min_len]
+
+            mixed = np.clip(
+                sys_arr.astype(np.float32) * 0.6 + mic_arr.astype(np.float32) * 0.6,
+                -32768, 32767
+            ).astype(np.int16)
+
+            with _lock:
+                _frames.append(mixed)
+                _frame_count += len(mixed)
+                if _frame_count >= CHUNK_FRAMES:
+                    _flush_chunk(list(_frames), _session_id, _chunk_index)
+                    _frames      = []
+                    _frame_count = 0
+                    _chunk_index += 1
+
+    finally:
+        mic_stream.stop()
+        mic_stream.close()
+        sys_stream.stop_stream()
+        sys_stream.close()
+        pa.terminate()
+        print("[recorder] 同時録音停止")
+
+
 # ── 録音開始 ──────────────────────────────────────
 def start() -> dict:
     global _recording, _frames, _stream, _session_id, _chunk_index, _frame_count, _record_thread
@@ -307,14 +485,30 @@ def start() -> dict:
         return {"status": "error", "message": "すでに録音中です"}
 
     try:
-        _session_id  = f"aura_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        _session_id  = f"cove_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         _frames      = []
         _chunk_index = 0
         _frame_count = 0
         _recording   = True
         source       = _get_recording_source()
 
-        if source == "system":
+        if source == "both":
+            import platform
+            if platform.system() == "Windows":
+                _record_thread = threading.Thread(target=_both_record_thread, daemon=True)
+                _record_thread.start()
+                print(f"[recorder] マイク＋システム音声同時録音開始: {_session_id}")
+            else:
+                # Mac: 未対応のためマイクのみにフォールバック
+                import sounddevice as sd
+                device_id = _get_device_id()
+                _stream = sd.InputStream(
+                    device=device_id, samplerate=SAMPLE_RATE,
+                    channels=CHANNELS, dtype=DTYPE, callback=_sd_callback,
+                )
+                _stream.start()
+                print(f"[recorder] Mac同時録音未対応: マイクのみで録音開始: {_session_id}")
+        elif source == "system":
             import platform
             if platform.system() == "Windows":
                 # Windows: pyaudiowpatch WASAPIループバック

@@ -284,15 +284,21 @@
           <div class="rec-source-check">✓</div>
           <div class="rec-source-icon">🖥️</div>
           <div class="rec-source-name">システム音声</div>
-          <div class="rec-source-desc">Zoom・Meet等のオンライン会議に対応</div>
+          <div class="rec-source-desc">相手の声のみ録音（Zoom・Meet等）</div>
+        </div>
+        <div class="rec-source-card" id="src-both" onclick="selectRecSource('both')">
+          <div class="rec-source-check">✓</div>
+          <div class="rec-source-icon">🎤🖥️</div>
+          <div class="rec-source-name">マイク＋システム音声</div>
+          <div class="rec-source-desc">自分と相手の声を両方録音（Zoom・Meet等）</div>
         </div>
       </div>
 
-      <!-- システム音声選択時の案内 -->
+      <!-- システム音声 / 同時録音 選択時の案内 -->
       <div class="device-select-area" id="deviceSelectArea">
         <!-- Windows向け案内 -->
         <div class="device-notice" id="windowsNotice" style="display:none;">
-          💡 <strong>Windowsの場合：</strong>追加設定なしでオンライン会議の音声を録音できます。
+          💡 <strong>Windowsの場合：</strong>追加設定なしでオンライン会議の音声を録音できます。<br>⚠️ <strong>システム音声のみ</strong>の場合は相手の声のみ録音されます。自分の声も録音するには「マイク＋システム音声」を選択してください。
         </div>
 
         <!-- Mac向け案内 -->

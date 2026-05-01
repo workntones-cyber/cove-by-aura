@@ -620,22 +620,37 @@ def _transcribe_faster_whisper(wav_filename: str, extra_prompt: str = "", record
             "ありがとうございます、失礼いたします。"
         )
         _cb("transcribe", "🎙️ 文字起こし中…", 10)
-        segments, info = model.transcribe(
-            transcribe_path,
+        # frozenモード時にVADファイルが存在しない場合はvad_filterを無効化
+        _use_vad = True
+        if getattr(_sys, "frozen", False):
+            _vad_path = Path(_sys.executable).resolve().parent / "_internal" / "faster_whisper" / "assets" / "silero_vad_v6.onnx"
+            if not _vad_path.exists():
+                _use_vad = False
+                print(f"[transcriber] VADモデルが見つからないためvad_filter無効: {_vad_path}")
+
+        # both モード（マイク＋システム音声ミックス）はループ幻覚が出やすいため
+        # condition_on_previous_text を無効化し、閾値を緩める
+        recording_source = _read_env().get("RECORDING_SOURCE", "mic")
+        is_both = recording_source == "both"
+
+        _transcribe_kwargs = dict(
             language="ja",
             beam_size=5,
             initial_prompt=initial_prompt,
-            vad_filter=True,
-            vad_parameters={
-                "min_silence_duration_ms": 500,
-                "speech_pad_ms": 400,
-            },
             word_timestamps=True,
-            condition_on_previous_text=True,
-            no_speech_threshold=0.5,
-            compression_ratio_threshold=1.8,
+            condition_on_previous_text=False if is_both else True,
+            no_speech_threshold=0.6 if is_both else 0.5,
+            compression_ratio_threshold=2.4 if is_both else 1.8,
             temperature=0,
         )
+        if _use_vad:
+            _transcribe_kwargs["vad_filter"] = True
+            _transcribe_kwargs["vad_parameters"] = {
+                "min_silence_duration_ms": 500,
+                "speech_pad_ms": 400,
+            }
+
+        segments, info = model.transcribe(transcribe_path, **_transcribe_kwargs)
         # 繰り返しセグメントを除外してから結合
         import re as _re
         filtered_segments = []
@@ -646,7 +661,7 @@ def _transcribe_faster_whisper(wav_filename: str, extra_prompt: str = "", record
             if not text:
                 continue
             # 同一文字・単語の異常な繰り返しを検出
-            if _re.search(r'(.{1,6})(\1){2,}', text):
+            if _re.search(r'(.{1,2})\1{3,}', text):
                 print(f"[transcriber] 繰り返しセグメントをスキップ: {text[:50]}")
                 continue
             # 同一セグメントが連続する場合は最大2回まで

@@ -4,7 +4,7 @@ Collective Opinion & Vision Engine
 **意思決定支援ツール**
 
 すべての処理がローカルPC上で完結するため、機密性の高い情報を外部に送信することなく利用できます。(ローカルAI設定時)
-状況に応じて、クラウドAI(GPT-4o,Gemini,Cloude,Llama)に変更することが可能です。
+状況に応じて、クラウドAI(GPT-4o,Gemini,Claude,Llama)に変更することが可能です。
 
 ---
 
@@ -71,7 +71,21 @@ ollama pull gemma3:27b
 
 > ダウンロードには30分〜2時間程度かかります。完了するまでウィンドウを閉じないでください。
 
-### 4. ffmpeg のインストール（トリミング機能用・任意）
+### 4. BlackHole のインストール（Macでシステム音声を録音する場合のみ）
+
+Macでオンライン会議（Zoom・Meet等）の音声を録音するには **BlackHole 2ch** が必要です。
+
+1. [https://existential.audio/blackhole/](https://existential.audio/blackhole/) から **BlackHole 2ch** をダウンロード・インストール
+2. Macを再起動
+3. 「Audio MIDI設定」→「複数出力装置を作成」→「BlackHole 2ch」と使用中のスピーカーの両方にチェック
+4. 「システム設定」→「サウンド」→ 出力を「複数出力装置」に変更
+5. COVEを再起動
+
+設定後はCOVEの設定画面で録音ソースを「システム音声」または「マイク＋システム音声」に切り替えてください。
+
+> ⚠️ Windowsの場合は追加設定なしでシステム音声の録音が可能です。
+
+### 5. ffmpeg のインストール（トリミング機能用・任意）
 
 **Windows**
 ```powershell
@@ -83,7 +97,7 @@ winget install ffmpeg
 brew install ffmpeg
 ```
 
-### 5. COVE のセットアップ
+### 6. COVE のセットアップ
 
 ```bash
 cd cove-by-aura
@@ -176,14 +190,26 @@ cove-by-aura/
 ## 環境変数（.env）
 
 ```env
-# AIモード: business（Ollama）/ personal（Groq）
-AI_MODE=business
+# AIモード: ollama（ローカル）/ groq / openai / gemini / claude（クラウド）
+AI_MODE=ollama
 
-# Groq APIキー（personalモード時のみ必要）
+# Groq APIキー（クラウドモード共通・文字起こしに使用）
 GROQ_API_KEY=
+
+# OpenAI APIキー（openaiモード時）
+OPENAI_API_KEY=
+
+# Gemini APIキー（geminiモード時）
+GEMINI_API_KEY=
+
+# Anthropic APIキー（claudeモード時）
+ANTHROPIC_API_KEY=
 
 # Ollamaモデル名
 OLLAMA_MODEL=gemma3:27b
+
+# 録音ソース: mic（マイク）/ system（システム音声）/ both（マイク＋システム音声）
+RECORDING_SOURCE=mic
 ```
 
 `env.example` をコピーして `.env` を作成してください。
@@ -215,7 +241,7 @@ iconutil -c icns cove.iconset
 | データベース | SQLite3 |
 | ローカルLLM | Ollama（gemma3:27b推奨） |
 | 文字起こし | faster-whisper |
-| 音声処理 | sounddevice / soundfile |
+| 音声処理 | sounddevice / pyaudiowpatch |
 | フロントエンド | HTML / CSS / Vanilla JS（SSEストリーミング） |
 
 ---
